@@ -1,0 +1,3 @@
+openai-whisper     # Whisper 로컬 추론용
+torch              # 모델 실행용
+python-multipart
