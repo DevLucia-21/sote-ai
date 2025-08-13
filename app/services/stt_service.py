@@ -314,27 +314,29 @@ def transcribe_audio(
     model_name: Optional[str] = None,
     do_vad: bool = False,
     low_conf_retranscribe: bool = True,
-    low_conf_threshold: float = -1.0,  # 현재 휴리스틱은 -1.0 고정 사용
+    low_conf_threshold: float = -1.0,
     timeout_seconds: Optional[float] = 30.0,
     prefer_first: bool = True
-) -> str:
-    """
-    오디오 파일을 텍스트로 변환(STT)
-    - prefer_first=True: small 모델 우선 → 실패 시 base 모델
-    - prefer_first=False: 지정 모델 우선 → 저신뢰 구간만 small 재추론
-    """
+) -> dict:
     tmp_files: List[str] = []
     try:
         src = Path(file_path)
         if not src.exists():
             raise FileNotFoundError(f"파일 없음: {file_path}")
 
-                # 모델 결정
+        # 오디오 길이 계산
+        try:
+            audio = AudioSegment.from_file(file_path)
+            duration_seconds = len(audio) / 1000.0
+        except Exception:
+            duration_seconds = None
+
+        # 모델 결정
         chosen = model_name or getattr(settings, "WHISPER_MODEL", None) or pick_default_model()
         if str(chosen).lower() == "auto":
             chosen = pick_default_model()
 
-        # prefer/fallback 및 전처리/beam 정책 결정
+        # prefer/fallback 및 전처리/beam 정책
         if prefer_first:
             prefer_model = chosen if chosen != "base" else "small"
             fallback_model = "base" if prefer_model != "base" else "tiny"
@@ -342,11 +344,11 @@ def transcribe_audio(
             prefer_beam = _beam_for(prefer_model)
         else:
             prefer_model = None
-            fallback_model = "small"  # 재추론용
+            fallback_model = "small"
             preprocess_enabled = _should_preprocess_for(chosen)
             prefer_beam = _beam_for(chosen)
 
-        # ---- WAV 변환 (전처리 스킵이면 생략) ----
+        # WAV 변환
         processed_path = str(src)
         if preprocess_enabled and PYDUB_AVAILABLE:
             try:
@@ -357,7 +359,7 @@ def transcribe_audio(
             except Exception:
                 pass
 
-        # ---- 무음 제거 (전처리 스킵이면 생략) ----
+        # 무음 제거
         effective_do_vad = (do_vad and preprocess_enabled)
         if effective_do_vad and PYDUB_AVAILABLE:
             try:
@@ -370,9 +372,13 @@ def transcribe_audio(
 
         def _call_model(name_local: str, beam: int):
             m = load_model(name_local)
-            # 전처리 스킵 시에는 vad_filter=False로 고정
-            return _fw_transcribe(m, processed_path, beam_size=beam, do_vad=effective_do_vad)
+            segs, info = _fw_transcribe(m, processed_path, beam_size=beam, do_vad=effective_do_vad)
+            return segs, info
 
+        used_device = "cuda" if _cuda_available() else "cpu"
+        used_compute_type = "float16" if used_device == "cuda" else "int8"
+
+        # --- prefer_first=True 케이스 ---
         if prefer_first:
             try_prefer = not (
                 prefer_model == "small"
@@ -382,37 +388,125 @@ def transcribe_audio(
             if try_prefer:
                 try:
                     if timeout_seconds is None:
-                        segs, _ = _call_model(prefer_model, beam=prefer_beam)
+                        segs, info = _call_model(prefer_model, beam=prefer_beam)
                     else:
                         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                            segs, _ = ex.submit(_call_model, prefer_model, prefer_beam).result(timeout=timeout_seconds)
-                    text = "".join(s["text"] for s in segs)
-                    return _post_process_korean(text, segs)
+                            segs, info = ex.submit(_call_model, prefer_model, prefer_beam).result(timeout=timeout_seconds)
+                    return _make_response(
+                        "".join(s["text"] for s in segs),
+                        prefer_model,
+                        used_device,
+                        used_compute_type,
+                        segs,
+                        info.get("language"),
+                        duration_seconds
+                    )
                 except Exception:
-                    pass
+                    pass  # prefer 실패 시 fallback으로
 
-            # fallback 실행 (base 쪽은 전처리 수행/beam=5)
-            segs, _ = _call_model(fallback_model, beam=_beam_for(fallback_model))
+            # fallback 실행
+            segs, info = _call_model(fallback_model, beam=_beam_for(fallback_model))
             if low_conf_retranscribe:
                 recomposed = _retranscribe_low_confidence_segments(
                     processed_path, segs, fallback_model_name=prefer_model
                 )
                 if recomposed:
-                    return recomposed
-            text = "".join(s["text"] for s in segs)
-            return _post_process_korean(text, segs)
+                    return _make_response(
+                        recomposed,
+                        fallback_model,
+                        used_device,
+                        used_compute_type,
+                        segs,
+                        info.get("language"),
+                        duration_seconds,
+                        retranscribe_model=prefer_model
+                    )
+                else:
+                    # 재추론 실패해도 모델명 기록
+                    return _make_response(
+                        "".join(s["text"] for s in segs),
+                        fallback_model,
+                        used_device,
+                        used_compute_type,
+                        segs,
+                        info.get("language"),
+                        duration_seconds,
+                        retranscribe_model=prefer_model
+                    )
 
+            return _make_response(
+                "".join(s["text"] for s in segs),
+                fallback_model,
+                used_device,
+                used_compute_type,
+                segs,
+                info.get("language"),
+                duration_seconds
+            )
+
+        # --- prefer_first=False 케이스 ---
         else:
-            segs, _ = _call_model(chosen, beam=prefer_beam)
+            segs, info = _call_model(chosen, beam=prefer_beam)
             if low_conf_retranscribe:
                 recomposed = _retranscribe_low_confidence_segments(
                     processed_path, segs, fallback_model_name="small"
                 )
                 if recomposed:
-                    return recomposed
-            text = "".join(s["text"] for s in segs)
-            return _post_process_korean(text, segs)
-        
+                    return _make_response(
+                        recomposed,
+                        chosen,
+                        used_device,
+                        used_compute_type,
+                        segs,
+                        info.get("language"),
+                        duration_seconds,
+                        retranscribe_model="small"
+                    )
+                else:
+                    return _make_response(
+                        "".join(s["text"] for s in segs),
+                        chosen,
+                        used_device,
+                        used_compute_type,
+                        segs,
+                        info.get("language"),
+                        duration_seconds,
+                        retranscribe_model="small"
+                    )
+
+            return _make_response(
+                "".join(s["text"] for s in segs),
+                chosen,
+                used_device,
+                used_compute_type,
+                segs,
+                info.get("language"),
+                duration_seconds
+            )
+
     finally:
         for p in tmp_files:
             Path(p).unlink(missing_ok=True)
+
+
+def _make_response(
+    text: str,
+    model: str,
+    device: str,
+    compute_type: str,
+    segments: list,
+    language: str,
+    duration: float,
+    retranscribe_model: Optional[str] = None
+) -> dict:
+    return {
+        "text": _post_process_korean(text, segments),
+        "model_name": model,
+        "device": device,
+        "compute_type": compute_type,
+        "language": language,
+        "duration_seconds": duration,
+        "segments": segments,
+        "note": None,
+        "retranscribe_model": retranscribe_model
+    }
