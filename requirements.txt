@@ -1,3 +1,15 @@
-openai-whisper     # Whisper 로컬 추론용
-torch              # 모델 실행용
+fastapi
+uvicorn[standard]
 python-multipart
+python-dotenv
+pydantic-settings
+pydub
+psutil
+aiofiles
+faster-whisper
+ctranslate2
+kss
+pecab
+numpy
+mecab-python3
+ffmpeg-python
