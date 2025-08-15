@@ -15,3 +15,6 @@ venv/
 
 # MacOS
 .DS_Store
+
+# Local audio uploads
+static/audio/

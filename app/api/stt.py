@@ -1,70 +1,87 @@
 # app/api/stt.py
-from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from app.services.stt_service import transcribe_audio
 from app.schemas.stt import STTResponse
-import tempfile
-from pathlib import Path
 from app.core.config import settings
 from typing import Optional
+import requests
+import io
+import os
+import tempfile
+import uuid
+import subprocess
 
 router = APIRouter(prefix="/ai/stt", tags=["stt"])
 
+# Spring Boot API URL (환경에 맞게 수정)
+SPRING_BOOT_URL = "http://localhost:8080/api/stt/results"
+
+def convert_m4a_to_wav(input_bytes: bytes) -> bytes:
+    tmp_input = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4().hex}.m4a")
+    tmp_output = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4().hex}.wav")
+    with open(tmp_input, "wb") as f:
+        f.write(input_bytes)
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", tmp_input, "-ac", "1", "-ar", "16000", tmp_output],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=True
+    )
+    with open(tmp_output, "rb") as f:
+        wav_bytes = f.read()
+    os.remove(tmp_input)
+    os.remove(tmp_output)
+    return wav_bytes
+
 @router.post("/transcribe", response_model=STTResponse)
 async def transcribe(
-    request: Request,
     file: UploadFile = File(...),
+    stt_provider: Optional[str] = Query(None, description="whisper 또는 openai"),
     model_name: Optional[str] = Query(None),
     do_vad: bool = Query(False),
     low_conf_retranscribe: bool = Query(True),
     low_conf_threshold: float = Query(-1.0),
     timeout_seconds: float = Query(30.0),
 ):
+    # 오디오 파일 MIME 타입 확인
     if not (file.content_type and file.content_type.startswith("audio/")):
-        raise HTTPException(status_code=415, detail=f"지원하지 않는 파일 타입: {file.content_type or 'unknown'}")
-
-    suffix = Path(file.filename or "").suffix or ".bin"
+        raise HTTPException(
+            status_code=415,
+            detail=f"지원하지 않는 파일 타입: {file.content_type or 'unknown'}"
+        )
+    
     try:
-        with tempfile.NamedTemporaryFile(prefix="stt_", suffix=suffix, delete=False) as tmp:
-            tmp_path = Path(tmp.name)
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                tmp.write(chunk)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"파일 저장 실패: {e}")
+        audio_bytes = await file.read()
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="업로드된 오디오가 비어있음")
 
-    # note 메시지 모음
-    notes = []
+        if file.filename and file.filename.lower().endswith(".m4a"):
+            audio_bytes = convert_m4a_to_wav(audio_bytes)
 
-    # 모바일 환경 감지
-    header_platform = (request.headers.get("x-client-platform") or "").lower()
-    is_mobile_client = str(getattr(settings, "DEPLOY_TARGET", "")).lower() == "mobile" or header_platform == "mobile"
+        audio_stream = io.BytesIO(audio_bytes)
 
-    effective_model = model_name
-    prefer_first_flag = True
-
-    # VAD 사용 여부 기록
-    if do_vad:
-        notes.append("무음 구간 제거 활성화")
-
-    try:
         result = transcribe_audio(
-            str(tmp_path),
-            model_name=effective_model,
+            audio_stream,
+            model_name=model_name,
             do_vad=do_vad,
             low_conf_retranscribe=low_conf_retranscribe,
             low_conf_threshold=low_conf_threshold,
             timeout_seconds=timeout_seconds,
-            prefer_first=prefer_first_flag,
+            prefer_first=True,
+            stt_provider=stt_provider
         )
+        
+        # note 메시지 모음
+        notes = []
 
-        # 최종 모델명 가져오기 (result 안에 있다고 가정)
-        final_model = result.get("model_name") or effective_model or "unknown"
+        # VAD 사용 여부 기록
+        if do_vad:
+            notes.append("무음 구간 제거 활성화")
+
+        final_model = result.get("model_name") or model_name or "unknown"
         re_model = result.get("retranscribe_model")
 
-        # 모델명 기록
-        if not model_name:  # 요청에서 안 넘긴 경우
+        if not model_name:
             notes.append(f"모델 자동 선택: {final_model}")
         elif final_model != model_name:
             notes.append(f"모델 변경: {model_name} → {final_model}")
@@ -79,14 +96,27 @@ async def transcribe(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"STT 변환 실패: {e}")
+    
     finally:
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        # 메모리 해제
+        if 'audio_stream' in locals():
+            audio_stream.close()
+        if 'audio_bytes' in locals():
+            del audio_bytes
+        if 'audio_stream' in locals():
+            del audio_stream
 
     # note 최종 문자열 합치기
-    note_text = "; ".join(notes) if notes else None
+    result["note"] = "; ".join(notes) if notes else None
 
-    result["note"] = note_text
+    # 2) Spring Boot로 text 전송
+    try:
+        payload = {
+            "text": result["text"],
+        }
+        res = requests.post(SPRING_BOOT_URL, json=payload, timeout=5)
+        res.raise_for_status()
+    except requests.RequestException as e:
+        print(f"[STT → Spring Boot 전송 실패] {e}")
+
     return STTResponse(**result)

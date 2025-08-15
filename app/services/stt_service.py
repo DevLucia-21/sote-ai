@@ -1,11 +1,14 @@
 import uuid
 import tempfile
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from app.core.config import settings
+from typing import Optional, Dict, Any, List, Tuple, Union, BinaryIO
+from openai import OpenAI
 import logging
 import concurrent.futures
 import os
 import re
+import io
 
 from faster_whisper import WhisperModel  # 경량화된 Whisper 구현
 
@@ -310,179 +313,222 @@ def _retranscribe_low_confidence_segments(
 
 # -------------------- 메인 전사 함수 --------------------
 def transcribe_audio(
-    file_path: str,
+    audio_source: Union[str, Path, BinaryIO],
     model_name: Optional[str] = None,
     do_vad: bool = False,
     low_conf_retranscribe: bool = True,
     low_conf_threshold: float = -1.0,
     timeout_seconds: Optional[float] = 30.0,
-    prefer_first: bool = True
+    prefer_first: bool = True,
+    stt_provider: str = "openai"  # whisper 또는 openai
 ) -> dict:
+    """
+    STT 변환 - whisper / openai 선택 가능
+    file_source: 로컬 파일 경로(str) 또는 BytesIO
+    """
+
     tmp_files: List[str] = []
-    try:
-        src = Path(file_path)
-        if not src.exists():
-            raise FileNotFoundError(f"파일 없음: {file_path}")
 
-        # 오디오 길이 계산
+    stt_provider = (stt_provider or os.getenv("STT_PROVIDER") or "openai").lower()
+
+    if isinstance(audio_source, io.BytesIO):
+        audio_source.seek(0)  # 중요: 파일 포인터 처음으로
+        tmp_path = Path(tempfile.gettempdir()) / f"stt_{uuid.uuid4().hex}.wav"
+        tmp_path.write_bytes(audio_source.read())
+        file_path = str(tmp_path)
+        tmp_files.append(file_path)
+    else:
+        file_path = str(audio_source)
+
+    try: 
+        # 1) OpenAI STT 로직
+        if stt_provider == "openai":
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            with open(file_path, "rb") as audio_file:
+                transcript = client.audio.transcriptions.create(
+                    model="gpt-4o-mini-transcribe",  # 또는 whisper-1
+                    file=audio_file
+                )
+            return {
+                "text": transcript.text.strip(),
+                "model_name": "openai:gpt-4o-mini-transcribe",
+                "device": "openai_api",
+                "language": "auto",
+            }
+
+        # 2) Whisper 로컬 로직
+        tmp_files: List[str] = []
         try:
-            audio = AudioSegment.from_file(file_path)
-            duration_seconds = len(audio) / 1000.0
-        except Exception:
-            duration_seconds = None
+            src = Path(file_path)
+            if not src.exists():
+                raise FileNotFoundError(f"파일 없음: {file_path}")
 
-        # 모델 결정
-        chosen = model_name or getattr(settings, "WHISPER_MODEL", None) or pick_default_model()
-        if str(chosen).lower() == "auto":
-            chosen = pick_default_model()
-
-        # prefer/fallback 및 전처리/beam 정책
-        if prefer_first:
-            prefer_model = chosen if chosen != "base" else "small"
-            fallback_model = "base" if prefer_model != "base" else "tiny"
-            preprocess_enabled = _should_preprocess_for(prefer_model)
-            prefer_beam = _beam_for(prefer_model)
-        else:
-            prefer_model = None
-            fallback_model = "small"
-            preprocess_enabled = _should_preprocess_for(chosen)
-            prefer_beam = _beam_for(chosen)
-
-        # WAV 변환
-        processed_path = str(src)
-        if preprocess_enabled and PYDUB_AVAILABLE:
+            # 오디오 길이 계산
             try:
-                converted = Path(tempfile.gettempdir()) / f"conv_{uuid.uuid4().hex}.wav"
-                _convert_to_wav_mono_16k(str(src), str(converted))
-                processed_path = str(converted)
-                tmp_files.append(str(converted))
+                audio = AudioSegment.from_file(file_path)
+                duration_seconds = len(audio) / 1000.0
             except Exception:
-                pass
+                duration_seconds = None
 
-        # 무음 제거
-        effective_do_vad = (do_vad and preprocess_enabled)
-        if effective_do_vad and PYDUB_AVAILABLE:
-            try:
-                trimmed = _remove_silence_simple(processed_path)
-                if trimmed != processed_path:
-                    tmp_files.append(trimmed)
-                    processed_path = trimmed
-            except Exception:
-                pass
+            # 모델 결정
+            chosen = model_name or getattr(settings, "WHISPER_MODEL", None) or pick_default_model()
+            if str(chosen).lower() == "auto":
+                chosen = pick_default_model()
 
-        def _call_model(name_local: str, beam: int):
-            m = load_model(name_local)
-            segs, info = _fw_transcribe(m, processed_path, beam_size=beam, do_vad=effective_do_vad)
-            return segs, info
+            # prefer/fallback 및 전처리/beam 정책
+            if prefer_first:
+                prefer_model = chosen if chosen != "base" else "small"
+                fallback_model = "base" if prefer_model != "base" else "tiny"
+                preprocess_enabled = _should_preprocess_for(prefer_model)
+                prefer_beam = _beam_for(prefer_model)
+            else:
+                prefer_model = None
+                fallback_model = "small"
+                preprocess_enabled = _should_preprocess_for(chosen)
+                prefer_beam = _beam_for(chosen)
 
-        used_device = "cuda" if _cuda_available() else "cpu"
-        used_compute_type = "float16" if used_device == "cuda" else "int8"
-
-        # --- prefer_first=True 케이스 ---
-        if prefer_first:
-            try_prefer = not (
-                prefer_model == "small"
-                and not _cuda_available()
-                and not _has_enough_ram_gb(settings.MIN_RAM_FOR_SMALL_GB)
-            )
-            if try_prefer:
+            # WAV 변환
+            processed_path = str(src)
+            if preprocess_enabled and PYDUB_AVAILABLE:
                 try:
-                    if timeout_seconds is None:
-                        segs, info = _call_model(prefer_model, beam=prefer_beam)
-                    else:
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                            segs, info = ex.submit(_call_model, prefer_model, prefer_beam).result(timeout=timeout_seconds)
-                    return _make_response(
-                        "".join(s["text"] for s in segs),
-                        prefer_model,
-                        used_device,
-                        used_compute_type,
-                        segs,
-                        info.get("language"),
-                        duration_seconds
-                    )
+                    converted = Path(tempfile.gettempdir()) / f"conv_{uuid.uuid4().hex}.wav"
+                    _convert_to_wav_mono_16k(str(src), str(converted))
+                    processed_path = str(converted)
+                    tmp_files.append(str(converted))
                 except Exception:
-                    pass  # prefer 실패 시 fallback으로
+                    pass
 
-            # fallback 실행
-            segs, info = _call_model(fallback_model, beam=_beam_for(fallback_model))
-            if low_conf_retranscribe:
-                recomposed = _retranscribe_low_confidence_segments(
-                    processed_path, segs, fallback_model_name=prefer_model
+            # 무음 제거
+            effective_do_vad = (do_vad and preprocess_enabled)
+            if effective_do_vad and PYDUB_AVAILABLE:
+                try:
+                    trimmed = _remove_silence_simple(processed_path)
+                    if trimmed != processed_path:
+                        tmp_files.append(trimmed)
+                        processed_path = trimmed
+                except Exception:
+                    pass
+
+            def _call_model(name_local: str, beam: int):
+                m = load_model(name_local)
+                segs, info = _fw_transcribe(m, processed_path, beam_size=beam, do_vad=effective_do_vad)
+                return segs, info
+
+            used_device = "cuda" if _cuda_available() else "cpu"
+            used_compute_type = "float16" if used_device == "cuda" else "int8"
+
+            # --- prefer_first=True 케이스 ---
+            if prefer_first:
+                try_prefer = not (
+                    prefer_model == "small"
+                    and not _cuda_available()
+                    and not _has_enough_ram_gb(settings.MIN_RAM_FOR_SMALL_GB)
                 )
-                if recomposed:
-                    return _make_response(
-                        recomposed,
-                        fallback_model,
-                        used_device,
-                        used_compute_type,
-                        segs,
-                        info.get("language"),
-                        duration_seconds,
-                        retranscribe_model=prefer_model
-                    )
-                else:
-                    # 재추론 실패해도 모델명 기록
-                    return _make_response(
-                        "".join(s["text"] for s in segs),
-                        fallback_model,
-                        used_device,
-                        used_compute_type,
-                        segs,
-                        info.get("language"),
-                        duration_seconds,
-                        retranscribe_model=prefer_model
-                    )
+                if try_prefer:
+                    try:
+                        if timeout_seconds is None:
+                            segs, info = _call_model(prefer_model, beam=prefer_beam)
+                        else:
+                            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                                segs, info = ex.submit(_call_model, prefer_model, prefer_beam).result(timeout=timeout_seconds)
+                        return _make_response(
+                            "".join(s["text"] for s in segs),
+                            prefer_model,
+                            used_device,
+                            used_compute_type,
+                            segs,
+                            info.get("language"),
+                            duration_seconds
+                        )
+                    except Exception:
+                        pass  # prefer 실패 시 fallback으로
 
-            return _make_response(
-                "".join(s["text"] for s in segs),
-                fallback_model,
-                used_device,
-                used_compute_type,
-                segs,
-                info.get("language"),
-                duration_seconds
-            )
+                # fallback 실행
+                segs, info = _call_model(fallback_model, beam=_beam_for(fallback_model))
+                if low_conf_retranscribe:
+                    recomposed = _retranscribe_low_confidence_segments(
+                        processed_path, segs, fallback_model_name=prefer_model
+                    )
+                    if recomposed:
+                        return _make_response(
+                            recomposed,
+                            fallback_model,
+                            used_device,
+                            used_compute_type,
+                            segs,
+                            info.get("language"),
+                            duration_seconds,
+                            retranscribe_model=prefer_model
+                        )
+                    else:
+                        # 재추론 실패해도 모델명 기록
+                        return _make_response(
+                            "".join(s["text"] for s in segs),
+                            fallback_model,
+                            used_device,
+                            used_compute_type,
+                            segs,
+                            info.get("language"),
+                            duration_seconds,
+                            retranscribe_model=prefer_model
+                        )
 
-        # --- prefer_first=False 케이스 ---
-        else:
-            segs, info = _call_model(chosen, beam=prefer_beam)
-            if low_conf_retranscribe:
-                recomposed = _retranscribe_low_confidence_segments(
-                    processed_path, segs, fallback_model_name="small"
+                return _make_response(
+                    "".join(s["text"] for s in segs),
+                    fallback_model,
+                    used_device,
+                    used_compute_type,
+                    segs,
+                    info.get("language"),
+                    duration_seconds
                 )
-                if recomposed:
-                    return _make_response(
-                        recomposed,
-                        chosen,
-                        used_device,
-                        used_compute_type,
-                        segs,
-                        info.get("language"),
-                        duration_seconds,
-                        retranscribe_model="small"
-                    )
-                else:
-                    return _make_response(
-                        "".join(s["text"] for s in segs),
-                        chosen,
-                        used_device,
-                        used_compute_type,
-                        segs,
-                        info.get("language"),
-                        duration_seconds,
-                        retranscribe_model="small"
-                    )
 
-            return _make_response(
-                "".join(s["text"] for s in segs),
-                chosen,
-                used_device,
-                used_compute_type,
-                segs,
-                info.get("language"),
-                duration_seconds
-            )
+            # --- prefer_first=False 케이스 ---
+            else:
+                segs, info = _call_model(chosen, beam=prefer_beam)
+                if low_conf_retranscribe:
+                    recomposed = _retranscribe_low_confidence_segments(
+                        processed_path, segs, fallback_model_name="small"
+                    )
+                    if recomposed:
+                        return _make_response(
+                            recomposed,
+                            chosen,
+                            used_device,
+                            used_compute_type,
+                            segs,
+                            info.get("language"),
+                            duration_seconds,
+                            retranscribe_model="small"
+                        )
+                    else:
+                        return _make_response(
+                            "".join(s["text"] for s in segs),
+                            chosen,
+                            used_device,
+                            used_compute_type,
+                            segs,
+                            info.get("language"),
+                            duration_seconds,
+                            retranscribe_model="small"
+                        )
+
+                return _make_response(
+                    "".join(s["text"] for s in segs),
+                    chosen,
+                    used_device,
+                    used_compute_type,
+                    segs,
+                    info.get("language"),
+                    duration_seconds
+                )
+
+        finally:
+            for f in tmp_files:
+                try:
+                    os.remove(f)
+                except FileNotFoundError:
+                    pass
 
     finally:
         for p in tmp_files:
@@ -507,6 +553,6 @@ def _make_response(
         "language": language,
         "duration_seconds": duration,
         "segments": segments,
-        "note": None,
+        "note": f"Whisper 로컬 변환 (model={model})",
         "retranscribe_model": retranscribe_model
     }
