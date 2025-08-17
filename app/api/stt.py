@@ -1,5 +1,5 @@
 # app/api/stt.py
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Request
 from app.services.stt_service import transcribe_audio
 from app.schemas.stt import STTResponse
 from app.core.config import settings
@@ -10,6 +10,7 @@ import os
 import tempfile
 import uuid
 import subprocess
+import json
 
 router = APIRouter(prefix="/ai/stt", tags=["stt"])
 
@@ -35,6 +36,7 @@ def convert_m4a_to_wav(input_bytes: bytes) -> bytes:
 
 @router.post("/transcribe", response_model=STTResponse)
 async def transcribe(
+    request: Request,
     file: UploadFile = File(...),
     stt_provider: Optional[str] = Query(None, description="whisper 또는 openai"),
     model_name: Optional[str] = Query(None),
@@ -111,10 +113,18 @@ async def transcribe(
 
     # 2) Spring Boot로 text 전송
     try:
+        # FastAPI 요청 헤더에서 JWT 추출
+        auth_header = request.headers.get("Authorization")
+        
         payload = {
-            "text": result["text"],
+            "text": str(result.get("text", ""))
         }
-        res = requests.post(SPRING_BOOT_URL, json=payload, timeout=5)
+        headers = {}
+        if auth_header:  # JWT가 있으면 그대로 붙여줌
+            headers["Authorization"] = auth_header
+            headers["Content-Type"] = "application/json"
+
+        res = requests.post(SPRING_BOOT_URL, data=json.dumps(payload, ensure_ascii=False), headers=headers, timeout=5)
         res.raise_for_status()
     except requests.RequestException as e:
         print(f"[STT → Spring Boot 전송 실패] {e}")

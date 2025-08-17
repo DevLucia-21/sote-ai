@@ -342,8 +342,9 @@ def transcribe_audio(
 
     try: 
         # 1) OpenAI STT 로직
-        if stt_provider == "openai":
+        if stt_provider.lower() == "openai":
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            
             with open(file_path, "rb") as audio_file:
                 transcript = client.audio.transcriptions.create(
                     model="gpt-4o-mini-transcribe",  # 또는 whisper-1
