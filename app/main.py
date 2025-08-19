@@ -1,12 +1,14 @@
 # app/main.py
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from app.core.config import settings
 from fastapi.staticfiles import StaticFiles
 
-# 라우터 임포트 (stt는 필수로 포함)
+# 라우터 임포트
 from app.api.stt import router as stt_router
+from app.api.analysis import router as analysis_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sote.main")
@@ -27,6 +29,9 @@ app.add_middleware(
 
 # 기본 라우터 등록
 app.include_router(stt_router)
+app.include_router(analysis_router)
+
+# 정적 파일 서빙
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
