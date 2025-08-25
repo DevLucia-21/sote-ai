@@ -1,3 +1,5 @@
+# app/schemas/stt.py
+
 from typing import Optional, List
 from pydantic import BaseModel
 
