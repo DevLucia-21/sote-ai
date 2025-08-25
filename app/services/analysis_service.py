@@ -1,4 +1,5 @@
 # app/services/analysis_service.py
+
 """
 일기 텍스트를 분석해 감정(단일 라벨) + 상황 맞춤 음악 2~3곡을 추천하는 모듈.
 
@@ -12,10 +13,15 @@
 - 장르는 항상 '대분류/소분류'로 정규화(genre, genre_main, genre_sub)
 - 결과 검증 후 필요 시 1회 재생성(보정)
 - OpenAI Python SDK v1 사용, JSON-only 응답 강제(response_format)
+
+추가
+- 출생연도(year) 기반 나이/나이대(age group)를 프롬프트에 명시해 세대 취향/향수/템포 가이드를 제공
+- 선호 장르(genres)는 백엔드(DB)에서 조회해 넘어온 대분류명(예: ["pop","jazz"])을 사용
 """
 
 import json
 import re
+from datetime import datetime
 from typing import Optional, List, Tuple
 
 from openai import OpenAI
@@ -343,11 +349,12 @@ def _format_korean_reason_sentence(reason_parts: dict) -> str:
         return f'{summary}. 그래서 {interp}.'
 
 # -------------------- 메인 API --------------------
-def analyze_text(text: str, genres: Optional[List[str]] = None) -> dict:
+def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> dict:
     """
     감정(단일 라벨) + 상황맞춤 음악 "후보 2~3곡" 추천.
     입력:
       - text: 일기 본문
+      - year: 사용자 출생연도 (DB에서 조회한 값)
       - genres: 사용자 선호 대분류 리스트(예: ["pop","jazz"]).
     반환(JSON):
       {
@@ -367,15 +374,48 @@ def analyze_text(text: str, genres: Optional[List[str]] = None) -> dict:
     if not settings.ENABLE_OPENAI or not settings.OPENAI_API_KEY:
         raise RuntimeError("OpenAI API is disabled. ENABLE_OPENAI/OPENAI_API_KEY 확인")
 
+    # 선호 대분류 정규화
     preferred_majors = [g.lower() for g in (genres or [])]
+    # 컨텍스트 감지
     contexts = _detect_contexts(text)  # 예: ["study","calm","rain"]
     subgenre_hint_text = _build_subgenre_hint(preferred_majors, contexts)
     contexts_text = ", ".join(contexts)
+
+    # 나이/나이대 계산
+    try:
+        current_year = datetime.now().year
+        age = max(0, int(current_year) - int(year))
+    except Exception:
+        age = 0  # 방어값
+
+    if age < 20:
+        age_group = "10대"
+        age_guide = "최신 트렌디/밝은 곡을 우선 고려."
+    elif age < 30:
+        age_group = "20대"
+        age_guide = "감성적 발라드/인디 위주, 트렌디/잔잔 밸런스."
+    elif age < 40:
+        age_group = "30대"
+        age_guide = "차분한 팝/발라드, 안정적 분위기 선호."
+    elif age < 50:
+        age_group = "40대"
+        age_guide = "향수 자극 곡 일부 허용, 과한 전자음 지양."
+    else:
+        age_group = "50대 이상"
+        age_guide = "향수/클래식/올드팝 고려, 과도한 강렬함 지양."
+
+    preferred_text = ", ".join(preferred_majors) if preferred_majors else "특이사항 없음"
 
     # -------- System 지침 --------
     system_instructions = f"""
     너는 한국 사용자를 위한 '일기 감정 분석 + 음악 추천' 전문가다.
     반드시 JSON만 출력한다(텍스트/설명/코드블록 금지).
+
+    사용자 정보:
+    - 출생연도: {year}
+    - 현재 나이: 약 {age}세 ({age_group})
+    - 나이대 가이드: {age_guide}
+    - 선호 대분류: {preferred_text}
 
     정확성:
     - 음악 메타데이터(가수/앨범/장르)가 불확실하면 그 곡을 버리고 신뢰되는 대중적 곡을 선택.
@@ -414,7 +454,7 @@ def analyze_text(text: str, genres: Optional[List[str]] = None) -> dict:
     """
 
     # -------- User 프롬프트(입력/스키마) --------
-    input_json = json.dumps({"text": text, "preferred_genres": genres or []}, ensure_ascii=False)
+    input_json = json.dumps({"text": text, "year": year, "preferred_genres": genres or []}, ensure_ascii=False)
 
     _output_schema = {
     "emotion": {
