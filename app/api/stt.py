@@ -1,44 +1,56 @@
-# app/api/stt.py
-
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Request
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Request
 from app.services.stt_service import transcribe_audio
 from app.schemas.stt import STTResponse
 from app.core.config import settings
 from typing import Optional
-import requests
 import io
 import os
+import shutil
 import tempfile
 import uuid
 import subprocess
+from pathlib import Path
+from datetime import date
+import requests
 import json
 
 router = APIRouter(prefix="/ai/stt", tags=["stt"])
 
-# Spring Boot API URL (환경에 맞게 수정)
-SPRING_BOOT_URL = "http://localhost:8080/api/stt/results"
+# ffmpeg 경로 설정 (.env > PATH > fallback)
+FFMPEG_BIN = settings.FFMPEG_BIN or shutil.which("ffmpeg") or "ffmpeg"
 
-def convert_m4a_to_wav(input_bytes: bytes) -> bytes:
-    tmp_input = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4().hex}.m4a")
-    tmp_output = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4().hex}.wav")
-    with open(tmp_input, "wb") as f:
-        f.write(input_bytes)
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", tmp_input, "-ac", "1", "-ar", "16000", tmp_output],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=True
-    )
-    with open(tmp_output, "rb") as f:
-        wav_bytes = f.read()
-    os.remove(tmp_input)
-    os.remove(tmp_output)
-    return wav_bytes
+
+def convert_to_wav_16k_mono(input_bytes: bytes, in_ext: str) -> bytes:
+    """모든 포맷을 16kHz mono WAV로 변환"""
+    tmp_dir = tempfile.gettempdir()
+    in_path = os.path.join(tmp_dir, f"{uuid.uuid4().hex}.{(in_ext or 'bin').lower()}")
+    out_path = os.path.join(tmp_dir, f"{uuid.uuid4().hex}.wav")
+
+    try:
+        with open(in_path, "wb") as f:
+            f.write(input_bytes)
+
+        proc = subprocess.run(
+            [FFMPEG_BIN, "-y", "-i", in_path, "-ac", "1", "-ar", "16000", out_path],
+            capture_output=True, text=True
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed: {proc.stderr.strip() or proc.stdout.strip()}")
+
+        wav_bytes = Path(out_path).read_bytes()
+        return wav_bytes
+    finally:
+        try: os.remove(in_path)
+        except FileNotFoundError: pass
+        try: os.remove(out_path)
+        except FileNotFoundError: pass
+
 
 @router.post("/transcribe", response_model=STTResponse)
 async def transcribe(
     request: Request,
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),   # 반드시 form-data → file 로 업로드
+    diary_date: Optional[str] = Form(None),
     stt_provider: Optional[str] = Query(None, description="whisper 또는 openai"),
     model_name: Optional[str] = Query(None),
     do_vad: bool = Query(False),
@@ -46,20 +58,31 @@ async def transcribe(
     low_conf_threshold: float = Query(-1.0),
     timeout_seconds: float = Query(30.0),
 ):
-    # 오디오 파일 MIME 타입 확인
-    if not (file.content_type and file.content_type.startswith("audio/")):
-        raise HTTPException(
-            status_code=415,
-            detail=f"지원하지 않는 파일 타입: {file.content_type or 'unknown'}"
-        )
-    
+    """
+    STT 변환 (파일 업로드 필수)
+    FastAPI → STT 변환 → Spring /stt/results 저장
+    Diary 저장은 자동으로 하지 않음 (사용자 수정 후 별도 호출)
+    """
+    content_type = (file.content_type or "").lower()
+    allowed_types = {
+        "audio/wav", "audio/x-wav", "audio/m4a", "audio/mp4",
+        "audio/mpeg", "audio/ogg", "application/octet-stream"
+    }
+    if content_type not in allowed_types:
+        raise HTTPException(status_code=415, detail=f"지원하지 않는 파일 타입: {file.content_type or 'unknown'}")
+
     try:
         audio_bytes = await file.read()
         if not audio_bytes:
             raise HTTPException(status_code=400, detail="업로드된 오디오가 비어있음")
 
-        if file.filename and file.filename.lower().endswith(".m4a"):
-            audio_bytes = convert_m4a_to_wav(audio_bytes)
+        ext = (file.filename or "").split(".")[-1].lower()
+        is_wav_ct = content_type in {"audio/wav", "audio/x-wav", "audio/wave"}
+        is_wav_ext = ext == "wav"
+        need_convert = not (is_wav_ct or is_wav_ext)
+
+        if need_convert:
+            audio_bytes = convert_to_wav_16k_mono(audio_bytes, ext or "bin")
 
         audio_stream = io.BytesIO(audio_bytes)
 
@@ -71,63 +94,37 @@ async def transcribe(
             low_conf_threshold=low_conf_threshold,
             timeout_seconds=timeout_seconds,
             prefer_first=True,
-            stt_provider=stt_provider
+            stt_provider=(stt_provider or "openai").lower(),
         )
-        
-        # note 메시지 모음
-        notes = []
 
-        # VAD 사용 여부 기록
-        if do_vad:
-            notes.append("무음 구간 제거 활성화")
+        # Spring /stt/results 저장
+        if getattr(settings, "SEND_STT_TO_SPRING", False):
+            auth_header = request.headers.get("Authorization")
+            headers = {"Content-Type": "application/json"}
+            if auth_header:
+                headers["Authorization"] = auth_header
+            try:
+                payload = {
+                    "text": str(result.get("text", "")),
+                    "diaryDate": diary_date or str(date.today())
+                }
+                requests.post(
+                    settings.SPRING_STT_URL,
+                    data=json.dumps(payload, ensure_ascii=False),
+                    headers=headers,
+                    timeout=5
+                ).raise_for_status()
+            except requests.RequestException as e:
+                print(f"[STT → Spring 저장 실패] {e}")
 
-        final_model = result.get("model_name") or model_name or "unknown"
-        re_model = result.get("retranscribe_model")
+        result["note"] = result.get("note", "") + " | DEBUG: STT 변환 및 Spring 저장 완료"
 
-        if not model_name:
-            notes.append(f"모델 자동 선택: {final_model}")
-        elif final_model != model_name:
-            notes.append(f"모델 변경: {model_name} → {final_model}")
-        else:
-            notes.append(f"모델: {final_model}")
-
-        if low_conf_retranscribe:
-            if re_model:
-                notes.append(f"저신뢰 구간 재추론 (모델: {re_model}, threshold={low_conf_threshold})")
-            else:
-                notes.append(f"저신뢰 구간 재추론 활성화 (threshold={low_conf_threshold})")
-
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"STT 변환 실패: {e}")
-    
     finally:
-        # 메모리 해제
         if 'audio_stream' in locals():
             audio_stream.close()
-        if 'audio_bytes' in locals():
-            del audio_bytes
-        if 'audio_stream' in locals():
-            del audio_stream
 
-    # note 최종 문자열 합치기
-    result["note"] = "; ".join(notes) if notes else None
-
-    # 2) Spring Boot로 text 전송
-    try:
-        # FastAPI 요청 헤더에서 JWT 추출
-        auth_header = request.headers.get("Authorization")
-        
-        payload = {
-            "text": str(result.get("text", ""))
-        }
-        headers = {}
-        if auth_header:  # JWT가 있으면 그대로 붙여줌
-            headers["Authorization"] = auth_header
-            headers["Content-Type"] = "application/json"
-
-        res = requests.post(SPRING_BOOT_URL, data=json.dumps(payload, ensure_ascii=False), headers=headers, timeout=5)
-        res.raise_for_status()
-    except requests.RequestException as e:
-        print(f"[STT → Spring Boot 전송 실패] {e}")
-
-    return STTResponse(**result)
+    return result
