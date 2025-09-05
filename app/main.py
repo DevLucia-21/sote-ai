@@ -1,4 +1,3 @@
-# app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
@@ -7,7 +6,8 @@ from fastapi.staticfiles import StaticFiles
 
 # 라우터 임포트
 from app.api.stt import router as stt_router
-from app.api.ocr import router as ocr_router   # ✅ OCR 라우터 추가
+from app.api.analysis import router as analysis_router
+from app.api.ocr import router as ocr_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sote.main")
@@ -25,9 +25,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ 라우터 등록
+# 라우터 등록
 app.include_router(stt_router)
-app.include_router(ocr_router)
+app.include_router(analysis_router)
+app.include_router(ocr_router, prefix="/ocr")
 
 # 정적 파일 서빙
 app.mount("/static", StaticFiles(directory="static"), name="static")

@@ -7,7 +7,6 @@ grpcio-status==1.74.0
 protobuf==6.31.1
 Pillow==11.3.0
 fastapi
-uvicorn
 requests
 httpx
 pydantic
@@ -17,3 +16,17 @@ python-multipart
 pyjwt
 pydantic-settingss
 PyJWT
+uvicorn[standard]
+python-multipart
+python-dotenv
+pydantic-settings
+pydub
+psutil
+aiofiles
+faster-whisper
+ctranslate2
+kss
+pecab
+numpy
+mecab-python3
+ffmpeg-python

@@ -1,3 +1,8 @@
+<<<<<<< HEAD
+=======
+# app/schemas/stt.py
+
+>>>>>>> 1a9ba9ea3eee9a0802cb93d9f81f70cab0fc53dc
 from typing import Optional, List
 from pydantic import BaseModel
 

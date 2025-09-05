@@ -1,5 +1,4 @@
-# app/api/stt.py
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Request, Header, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Request
 from app.services.stt_service import transcribe_audio
 from app.schemas.stt import STTResponse
 from app.core.config import settings
@@ -14,57 +13,13 @@ from pathlib import Path
 from datetime import date
 import requests
 import json
-import jwt
-from redis.asyncio import Redis
 
 router = APIRouter(prefix="/ai/stt", tags=["stt"])
 
-# ✅ ffmpeg 경로 설정 (.env > PATH > fallback)
+# ffmpeg 경로 설정 (.env > PATH > fallback)
 FFMPEG_BIN = settings.FFMPEG_BIN or shutil.which("ffmpeg") or "ffmpeg"
 
-# ✅ Redis 연결
-redis = Redis(host="localhost", port=6379, decode_responses=True)
 
-
-# ----------------------------
-# JWT 토큰에서 userId(sub) 추출
-# ----------------------------
-def get_current_user_id(authorization: str = Header(...)) -> int:
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="잘못된 인증 형식")
-    token = authorization.replace("Bearer ", "")
-
-    try:
-        payload = jwt.decode(token, options={"verify_signature": False})
-        sub = payload.get("sub")
-        if not sub:
-            raise HTTPException(status_code=401, detail="sub 없음")
-        return int(sub)
-    except Exception:
-        raise HTTPException(status_code=401, detail="토큰 파싱 실패")
-
-
-# ----------------------------
-# STT 하루 1회 제한 (Redis)
-# ----------------------------
-async def check_stt_limit(user_id: int):
-    today = date.today().isoformat()
-    key = f"stt:{user_id}:{today}"
-
-    exists = await redis.exists(key)
-    if exists:
-        raise HTTPException(
-            status_code=403,
-            detail="오늘은 이미 STT를 실행했습니다. 하루 1회만 가능합니다."
-        )
-
-    # TTL = 24시간
-    await redis.set(key, "1", ex=60 * 60 * 24)
-
-
-# ----------------------------
-# 오디오 변환 도우미
-# ----------------------------
 def convert_to_wav_16k_mono(input_bytes: bytes, in_ext: str) -> bytes:
     """모든 포맷을 16kHz mono WAV로 변환"""
     tmp_dir = tempfile.gettempdir()
@@ -91,9 +46,6 @@ def convert_to_wav_16k_mono(input_bytes: bytes, in_ext: str) -> bytes:
         except FileNotFoundError: pass
 
 
-# ----------------------------
-# STT 변환 API
-# ----------------------------
 @router.post("/transcribe", response_model=STTResponse)
 async def transcribe(
     request: Request,
@@ -105,16 +57,12 @@ async def transcribe(
     low_conf_retranscribe: bool = Query(True),
     low_conf_threshold: float = Query(-1.0),
     timeout_seconds: float = Query(30.0),
-    user_id: int = Depends(get_current_user_id)  # JWT에서 userId 추출
 ):
     """
-    STT 변환 (파일 업로드 필수, 하루 1회 제한)
+    STT 변환 (파일 업로드 필수)
     FastAPI → STT 변환 → Spring /stt/results 저장
     Diary 저장은 자동으로 하지 않음 (사용자 수정 후 별도 호출)
     """
-    # 하루 1회 제한 체크
-    await check_stt_limit(user_id)
-
     content_type = (file.content_type or "").lower()
     allowed_types = {
         "audio/wav", "audio/x-wav", "audio/m4a", "audio/mp4",
@@ -149,7 +97,7 @@ async def transcribe(
             stt_provider=(stt_provider or "openai").lower(),
         )
 
-        # ✅ Spring /stt/results 저장
+        # Spring /stt/results 저장
         if getattr(settings, "SEND_STT_TO_SPRING", False):
             auth_header = request.headers.get("Authorization")
             headers = {"Content-Type": "application/json"}
@@ -160,15 +108,14 @@ async def transcribe(
                     "text": str(result.get("text", "")),
                     "diaryDate": diary_date or str(date.today())
                 }
-                r = requests.post(
+                requests.post(
                     settings.SPRING_STT_URL,
-                    json=payload,  # ✅ json으로 전달
+                    data=json.dumps(payload, ensure_ascii=False),
                     headers=headers,
                     timeout=5
-                )
-                r.raise_for_status()
+                ).raise_for_status()
             except requests.RequestException as e:
-                raise HTTPException(status_code=500, detail=f"[STT → Spring 저장 실패] {e}")
+                print(f"[STT → Spring 저장 실패] {e}")
 
         result["note"] = result.get("note", "") + " | DEBUG: STT 변환 및 Spring 저장 완료"
 
