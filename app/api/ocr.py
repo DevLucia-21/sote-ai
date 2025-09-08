@@ -4,6 +4,8 @@ from app.services.ocr_service import run_ocr_preview
 from datetime import date
 import jwt
 from redis.asyncio import Redis
+from app.core.config import settings
+
 
 # ----------------------------
 # Redis 연결
@@ -17,25 +19,27 @@ router = APIRouter(prefix="/ocr", tags=["ocr"])
 # JWT 토큰에서 userId(sub) 추출
 # ----------------------------
 def get_current_user_id(authorization: str = Header(...)) -> int:
-    """
-    Authorization 헤더에서 JWT 파싱 후 sub(사용자 ID) 추출
-    - 예: "Authorization: Bearer <token>"
-    """
-    if not authorization.startswith("Bearer "):
+    if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="잘못된 인증 형식")
-    token = authorization.replace("Bearer ", "")
+
+    token = authorization.split(" ")[1].strip()
 
     try:
-        # ⚠️ verify_signature=False → 테스트/개발용
-        # 운영에서는 반드시 시크릿 키 검증 필요
-        payload = jwt.decode(token, options={"verify_signature": False})
-        sub = payload.get("sub")
-        if not sub:
-            raise HTTPException(status_code=401, detail="sub 없음")
-        return int(sub)  # "1" → 1
-    except Exception:
-        raise HTTPException(status_code=401, detail="토큰 파싱 실패")
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET,        # Spring과 같은 시크릿 키
+            algorithms=["HS256"]
+        )
+        user_id = payload.get("sub") or payload.get("userId")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="userId(sub) 없음")
 
+        return int(user_id)
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="토큰 만료")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
 
 # ----------------------------
 # OCR 하루 1회 제한 함수 (Redis)
