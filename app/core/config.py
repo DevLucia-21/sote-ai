@@ -13,6 +13,8 @@ load_dotenv(dotenv_path=env_path)
 
 
 class Settings(BaseSettings):
+    JWT_SECRET: str = os.getenv("JWT_SECRET", "dev-secret")
+    
     # OpenAI (로컬 추론만 쓰면 False 유지)
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
     ENABLE_OPENAI: bool = os.getenv("ENABLE_OPENAI", "false").lower() == "true"
