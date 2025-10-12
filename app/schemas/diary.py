@@ -1,3 +1,4 @@
+#app/schemas/diary.py
 from pydantic import BaseModel
 from datetime import date
 

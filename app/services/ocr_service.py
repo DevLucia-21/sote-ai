@@ -1,9 +1,9 @@
+# app/service/ocr_service.py
 import uuid
 from fastapi import UploadFile, HTTPException
 from google.cloud import vision, storage
 from google.oauth2 import service_account
 from app.core.config import settings
-import requests, json
 
 # GCP 인증
 credentials = service_account.Credentials.from_service_account_file(
@@ -12,59 +12,40 @@ credentials = service_account.Credentials.from_service_account_file(
 vision_client = vision.ImageAnnotatorClient(credentials=credentials)
 storage_client = storage.Client(credentials=credentials)
 
+# GCS 버킷 (필요 시 .env에서 관리)
 BUCKET_NAME = "sote-diary-uploads-2025"
 
-async def run_ocr_preview(file: UploadFile, diary_date: str, auth_header: str = None):
+async def run_ocr_preview(file: UploadFile, diary_date: str):
+    """
+    1) 이미지를 GCS에 업로드
+    2) Google Vision OCR 수행
+    3) 결과를 '미리보기'로만 반환 (Spring 저장은 하지 않음)
+    """
     try:
+        # 파일명 생성
         ext = (file.filename or "img").split(".")[-1]
         filename = f"{uuid.uuid4()}.{ext}"
 
+        # 1) GCS 업로드
         bucket = storage_client.bucket(BUCKET_NAME)
         blob = bucket.blob(filename)
         blob.upload_from_file(file.file, content_type=file.content_type)
         image_url = f"https://storage.googleapis.com/{BUCKET_NAME}/{filename}"
 
+        # 2) Vision OCR
         content = blob.download_as_bytes()
         image = vision.Image(content=content)
         response = vision_client.text_detection(image=image)
         annotations = response.text_annotations
         text = annotations[0].description.strip() if annotations else ""
 
-        result = {
+        # 3) 저장하지 않고 그대로 반환
+        return {
             "message": "OCR preview generated",
             "text": text,
             "imageUrl": image_url,
             "diaryDate": diary_date
         }
-
-        # ✅ Spring 저장 (옵션)
-        if getattr(settings, "SEND_OCR_TO_SPRING", False):
-            headers = {"Content-Type": "application/json"}
-            if auth_header:
-                headers["Authorization"] = auth_header
-
-            payload = {
-                "content": text,
-                "imageUrl": image_url,
-                "date": diary_date
-            }
-
-            # 🔍 로그 출력
-            print(f"[DEBUG] Authorization: {headers.get('Authorization')}")
-            print(f"[DEBUG] Spring OCR 저장 URL: {settings.SPRING_OCR_URL}")
-            print(f"[DEBUG] Spring OCR payload: {payload}")
-
-            try:
-                requests.post(
-                    settings.SPRING_OCR_URL,
-                    data=json.dumps(payload, ensure_ascii=False),
-                    headers=headers,
-                    timeout=5
-                ).raise_for_status()
-            except requests.RequestException as e:
-                print(f"[OCR → Spring 저장 실패] {e}")
-
-        return result
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OCR failed: {repr(e)}")

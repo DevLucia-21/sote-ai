@@ -6,7 +6,6 @@ import jwt
 from redis.asyncio import Redis
 from app.core.config import settings
 
-
 # ----------------------------
 # Redis 연결
 # ----------------------------

@@ -11,6 +11,7 @@ requests
 httpx
 pydantic
 google-cloud-vision
+dlrj
 python-multipart
 pyjwt
 pydantic-settingss
