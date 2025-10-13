@@ -18,11 +18,24 @@ logger = logging.getLogger("sote.main")
 app = FastAPI(title="Sote AI API")
 
 # CORS 설정
-# 개발 환경에서는 모든 Origin 허용 ("*")
-# 운영 환경에서는 반드시 도메인 지정 권장 (예: ["https://sote.app"])
+# 개발 환경에서는 localhost, 운영 환경에서는 도메인만 허용
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://sote.kr",
+    "https://app.sote.kr",
+    "https://fastapi.sote.kr"
+]
+
+# 운영일 때는 위 도메인만, 개발일 때는 전체 허용
+if settings.ENVIRONMENT != "production":
+    allow_origins = ["*"]
+else:
+    allow_origins = origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.ENVIRONMENT != "production" else ["https://your-domain.com"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
