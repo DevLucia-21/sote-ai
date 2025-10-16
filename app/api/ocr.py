@@ -1,8 +1,8 @@
 # app/api/ocr.py
-from fastapi import APIRouter, UploadFile, Form, HTTPException, Header, Depends
+from fastapi import APIRouter, UploadFile, Form, HTTPException#, Header, Depends
 from app.services.ocr_service import run_ocr_preview
 from datetime import date
-import jwt
+#import jwt
 from redis.asyncio import Redis
 from app.core.config import settings
 
@@ -13,33 +13,33 @@ redis = Redis(host="localhost", port=6379, decode_responses=True)
 
 router = APIRouter(prefix="/ocr", tags=["ocr"])
 
-
-# ----------------------------
-# JWT 토큰에서 userId(sub) 추출
-# ----------------------------
+'''
+ # ----------------------------
+ # JWT 토큰에서 userId(sub) 추출
+ # ----------------------------
 def get_current_user_id(authorization: str = Header(...)) -> int:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="잘못된 인증 형식")
+     if not authorization or not authorization.startswith("Bearer "):
+         raise HTTPException(status_code=401, detail="잘못된 인증 형식")
 
-    token = authorization.split(" ")[1].strip()
+     token = authorization.split(" ")[1].strip()
 
-    try:
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET,        # Spring과 같은 시크릿 키
-            algorithms=["HS256"]
-        )
-        user_id = payload.get("sub") or payload.get("userId")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="userId(sub) 없음")
+     try:
+         payload = jwt.decode(
+             token,
+             settings.JWT_SECRET,        # Spring과 같은 시크릿 키
+             algorithms=["HS256"]
+         )
+         user_id = payload.get("sub") or payload.get("userId")
+         if not user_id:
+             raise HTTPException(status_code=401, detail="userId(sub) 없음")
 
-        return int(user_id)
+         return int(user_id)
 
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="토큰 만료")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
-
+     except jwt.ExpiredSignatureError:
+         raise HTTPException(status_code=401, detail="토큰 만료")
+     except jwt.InvalidTokenError:
+         raise HTTPException(status_code=401, detail="유효하지 않은 토큰")
+'''
 # ----------------------------
 # OCR 하루 1회 제한 함수 (Redis)
 # ----------------------------
@@ -65,7 +65,9 @@ async def check_ocr_limit(user_id: int):
 async def ocr_preview(
     file: UploadFile,
     diary_date: str = Form(...),
-    user_id: int = Depends(get_current_user_id),  # JWT에서 userId 추출
+    #user_id: int = Depends(get_current_user_id),  # JWT에서 userId 추출
+    user_id: int = Form(...),   # JWT 대신 Form 데이터로 uid 받음
+
 ):
     """
     OCR 미리보기 (하루 1회 제한 적용, Redis 기반)

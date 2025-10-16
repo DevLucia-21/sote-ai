@@ -40,10 +40,14 @@ def convert_to_wav_16k_mono(input_bytes: bytes, in_ext: str) -> bytes:
         wav_bytes = Path(out_path).read_bytes()
         return wav_bytes
     finally:
-        try: os.remove(in_path)
-        except FileNotFoundError: pass
-        try: os.remove(out_path)
-        except FileNotFoundError: pass
+        try:
+            os.remove(in_path)
+        except FileNotFoundError:
+            pass
+        try:
+            os.remove(out_path)
+        except FileNotFoundError:
+            pass
 
 
 @router.post("/transcribe", response_model=STTResponse)
@@ -51,6 +55,7 @@ async def transcribe(
     request: Request,
     file: UploadFile = File(...),   # 반드시 form-data → file 로 업로드
     diary_date: Optional[str] = Form(None),
+    user_id: Optional[int] = Form(None),     # 변경: JWT 대신 사용자 ID(Form)로 직접 받음
     stt_provider: Optional[str] = Query(None, description="whisper 또는 openai"),
     model_name: Optional[str] = Query(None),
     do_vad: bool = Query(False),
@@ -72,6 +77,7 @@ async def transcribe(
         raise HTTPException(status_code=415, detail=f"지원하지 않는 파일 타입: {file.content_type or 'unknown'}")
 
     try:
+        # 오디오 파일 읽기
         audio_bytes = await file.read()
         if not audio_bytes:
             raise HTTPException(status_code=400, detail="업로드된 오디오가 비어있음")
@@ -81,11 +87,13 @@ async def transcribe(
         is_wav_ext = ext == "wav"
         need_convert = not (is_wav_ct or is_wav_ext)
 
+        # ffmpeg 변환 (필요 시)
         if need_convert:
             audio_bytes = convert_to_wav_16k_mono(audio_bytes, ext or "bin")
 
         audio_stream = io.BytesIO(audio_bytes)
 
+        # STT 변환 수행
         result = transcribe_audio(
             audio_stream,
             model_name=model_name,
@@ -97,26 +105,26 @@ async def transcribe(
             stt_provider=(stt_provider or "openai").lower(),
         )
 
-        # Spring /stt/results 저장
+        # Spring /stt/results 저장 (JSON 방식으로 수정)
         if getattr(settings, "SEND_STT_TO_SPRING", False):
-            auth_header = request.headers.get("Authorization")
-            headers = {"Content-Type": "application/json"}
-            if auth_header:
-                headers["Authorization"] = auth_header
             try:
                 payload = {
+                    "userId": user_id or 0,   # FastAPI → Spring : userId 전달
                     "text": str(result.get("text", "")),
-                    "diaryDate": diary_date or str(date.today())
                 }
-                requests.post(
+
+                # ✅ 변경점: data=json.dumps(...) → json=payload (자동 Content-Type 설정)
+                response = requests.post(
                     settings.SPRING_STT_URL,
-                    data=json.dumps(payload, ensure_ascii=False),
-                    headers=headers,
+                    json=payload,
                     timeout=5
-                ).raise_for_status()
+                )
+                response.raise_for_status()
+
             except requests.RequestException as e:
                 print(f"[STT → Spring 저장 실패] {e}")
 
+        # 결과 반환
         result["note"] = result.get("note", "") + " | DEBUG: STT 변환 및 Spring 저장 완료"
 
     except HTTPException:

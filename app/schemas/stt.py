@@ -22,6 +22,8 @@ class STTRequest(BaseModel):
     low_conf_threshold: Optional[float] = None         # avg_logprob 임계값
     prefer_first: Optional[bool] = None      # True: small-first, False: primary-first
     compute_type: Optional[str] = None       # "int8" 등(설정값 오버라이드용, 선택)
+    user_id: Optional[int] = None    # 변경: UID 추가
+
 
 # STT 결과 응답
 class STTResponse(BaseModel):
@@ -34,3 +36,5 @@ class STTResponse(BaseModel):
     segments: Optional[List[Segment]] = None
     note: Optional[str] = None               # 추가 메시지(폴백·보정 여부 등)
     audio_url: Optional[str] = None
+    user_id: Optional[int] = None    # 변경: UID 추가
+
