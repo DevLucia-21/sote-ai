@@ -15,7 +15,7 @@ storage_client = storage.Client(credentials=credentials)
 # GCS 버킷 (필요 시 .env에서 관리)
 BUCKET_NAME = "sote-diary-uploads-2025"
 
-async def run_ocr_preview(file: UploadFile, diary_date: str):
+async def run_ocr_preview(file: UploadFile):
     """
     1) 이미지를 GCS에 업로드
     2) Google Vision OCR 수행
@@ -42,10 +42,10 @@ async def run_ocr_preview(file: UploadFile, diary_date: str):
         # 3) 저장하지 않고 그대로 반환
         return {
             "message": "OCR preview generated",
-            "text": text,
+            "content": text,          
             "imageUrl": image_url,
-            "diaryDate": diary_date
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OCR failed: {repr(e)}")
+
+
