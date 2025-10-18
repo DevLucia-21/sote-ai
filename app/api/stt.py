@@ -1,4 +1,5 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Request
+# app/api/stt.py
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Request, Header, Depends
 from app.services.stt_service import transcribe_audio
 from app.schemas.stt import STTResponse
 from app.core.config import settings
@@ -13,13 +14,57 @@ from pathlib import Path
 from datetime import date
 import requests
 import json
+import jwt
+from redis.asyncio import Redis
 
 router = APIRouter(prefix="/ai/stt", tags=["stt"])
 
-# ffmpeg 경로 설정 (.env > PATH > fallback)
+# ✅ ffmpeg 경로 설정 (.env > PATH > fallback)
 FFMPEG_BIN = settings.FFMPEG_BIN or shutil.which("ffmpeg") or "ffmpeg"
 
+# ✅ Redis 연결
+redis = Redis(host="localhost", port=6379, decode_responses=True)
 
+
+# ----------------------------
+# JWT 토큰에서 userId(sub) 추출
+# ----------------------------
+def get_current_user_id(authorization: str = Header(...)) -> int:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="잘못된 인증 형식")
+    token = authorization.replace("Bearer ", "")
+
+    try:
+        payload = jwt.decode(token, options={"verify_signature": False})
+        sub = payload.get("sub")
+        if not sub:
+            raise HTTPException(status_code=401, detail="sub 없음")
+        return int(sub)
+    except Exception:
+        raise HTTPException(status_code=401, detail="토큰 파싱 실패")
+
+
+# ----------------------------
+# STT 하루 1회 제한 (Redis)
+# ----------------------------
+async def check_stt_limit(user_id: int):
+    today = date.today().isoformat()
+    key = f"stt:{user_id}:{today}"
+
+    exists = await redis.exists(key)
+    if exists:
+        raise HTTPException(
+            status_code=403,
+            detail="오늘은 이미 STT를 실행했습니다. 하루 1회만 가능합니다."
+        )
+
+    # TTL = 24시간
+    await redis.set(key, "1", ex=60 * 60 * 24)
+
+
+# ----------------------------
+# 오디오 변환 도우미
+# ----------------------------
 def convert_to_wav_16k_mono(input_bytes: bytes, in_ext: str) -> bytes:
     """모든 포맷을 16kHz mono WAV로 변환"""
     tmp_dir = tempfile.gettempdir()
@@ -40,34 +85,36 @@ def convert_to_wav_16k_mono(input_bytes: bytes, in_ext: str) -> bytes:
         wav_bytes = Path(out_path).read_bytes()
         return wav_bytes
     finally:
-        try:
-            os.remove(in_path)
-        except FileNotFoundError:
-            pass
-        try:
-            os.remove(out_path)
-        except FileNotFoundError:
-            pass
+        try: os.remove(in_path)
+        except FileNotFoundError: pass
+        try: os.remove(out_path)
+        except FileNotFoundError: pass
 
 
+# ----------------------------
+# STT 변환 API
+# ----------------------------
 @router.post("/transcribe", response_model=STTResponse)
 async def transcribe(
     request: Request,
     file: UploadFile = File(...),   # 반드시 form-data → file 로 업로드
     diary_date: Optional[str] = Form(None),
-    user_id: Optional[int] = Form(None),     # 변경: JWT 대신 사용자 ID(Form)로 직접 받음
     stt_provider: Optional[str] = Query(None, description="whisper 또는 openai"),
     model_name: Optional[str] = Query(None),
     do_vad: bool = Query(False),
     low_conf_retranscribe: bool = Query(True),
     low_conf_threshold: float = Query(-1.0),
     timeout_seconds: float = Query(30.0),
+    user_id: int = Depends(get_current_user_id)  # JWT에서 userId 추출
 ):
     """
-    STT 변환 (파일 업로드 필수)
+    STT 변환 (파일 업로드 필수, 하루 1회 제한)
     FastAPI → STT 변환 → Spring /stt/results 저장
     Diary 저장은 자동으로 하지 않음 (사용자 수정 후 별도 호출)
     """
+    # 하루 1회 제한 체크
+    await check_stt_limit(user_id)
+
     content_type = (file.content_type or "").lower()
     allowed_types = {
         "audio/wav", "audio/x-wav", "audio/m4a", "audio/mp4",
@@ -77,7 +124,6 @@ async def transcribe(
         raise HTTPException(status_code=415, detail=f"지원하지 않는 파일 타입: {file.content_type or 'unknown'}")
 
     try:
-        # 오디오 파일 읽기
         audio_bytes = await file.read()
         if not audio_bytes:
             raise HTTPException(status_code=400, detail="업로드된 오디오가 비어있음")
@@ -87,13 +133,11 @@ async def transcribe(
         is_wav_ext = ext == "wav"
         need_convert = not (is_wav_ct or is_wav_ext)
 
-        # ffmpeg 변환 (필요 시)
         if need_convert:
             audio_bytes = convert_to_wav_16k_mono(audio_bytes, ext or "bin")
 
         audio_stream = io.BytesIO(audio_bytes)
 
-        # STT 변환 수행
         result = transcribe_audio(
             audio_stream,
             model_name=model_name,
@@ -105,26 +149,27 @@ async def transcribe(
             stt_provider=(stt_provider or "openai").lower(),
         )
 
-        # Spring /stt/results 저장 (JSON 방식으로 수정)
+        # ✅ Spring /stt/results 저장
         if getattr(settings, "SEND_STT_TO_SPRING", False):
+            auth_header = request.headers.get("Authorization")
+            headers = {"Content-Type": "application/json"}
+            if auth_header:
+                headers["Authorization"] = auth_header
             try:
                 payload = {
-                    "userId": user_id or 0,   # FastAPI → Spring : userId 전달
                     "text": str(result.get("text", "")),
+                    "diaryDate": diary_date or str(date.today())
                 }
-
-                # ✅ 변경점: data=json.dumps(...) → json=payload (자동 Content-Type 설정)
-                response = requests.post(
+                r = requests.post(
                     settings.SPRING_STT_URL,
-                    json=payload,
+                    json=payload,  # ✅ json으로 전달
+                    headers=headers,
                     timeout=5
                 )
-                response.raise_for_status()
-
+                r.raise_for_status()
             except requests.RequestException as e:
-                print(f"[STT → Spring 저장 실패] {e}")
+                raise HTTPException(status_code=500, detail=f"[STT → Spring 저장 실패] {e}")
 
-        # 결과 반환
         result["note"] = result.get("note", "") + " | DEBUG: STT 변환 및 Spring 저장 완료"
 
     except HTTPException:
