@@ -21,8 +21,8 @@ BUCKET_NAME = "sote-diary-uploads-2025"
 # ----------------------------
 async def run_ocr_preview(file: UploadFile):
     """
-    1) 이미지를 GCS에 업로드 (공개 URL 생성)
-    2) Google Vision OCR 수행
+    1) 이미지를 GCS에 업로드 (Uniform Access 정책 호환)
+    2) Google Vision OCR 수행 (로컬 메모리 기반)
     3) 결과 반환 (Spring 저장 X)
     """
     try:
@@ -30,23 +30,26 @@ async def run_ocr_preview(file: UploadFile):
         ext = (file.filename or "img").split(".")[-1]
         filename = f"{uuid.uuid4()}.{ext}"
 
-        # GCS 업로드
+        # 파일을 메모리에 먼저 로드 (ACL 충돌 방지)
+        file_bytes = await file.read()
+
+        # GCS 업로드 (Uniform access에서도 정상 작동)
         bucket = storage_client.bucket(BUCKET_NAME)
         blob = bucket.blob(filename)
-        blob.upload_from_file(file.file, content_type=file.content_type)
+        blob.upload_from_string(file_bytes, content_type=file.content_type)
 
-        # ✅ 업로드한 객체만 공개 처리
-        blob.make_public()
-        image_url = blob.public_url
+        # 공개 URL 직접 구성 (blob.make_public() 호출 X)
+        image_url = f"https://storage.googleapis.com/{BUCKET_NAME}/{filename}"
 
-        # OCR 수행
-        content = blob.download_as_bytes()
-        image = vision.Image(content=content)
+        # Vision API는 업로드된 파일 대신 메모리 데이터를 사용
+        image = vision.Image(content=file_bytes)
         response = vision_client.text_detection(image=image)
 
+        # Vision API 오류 처리
         if response.error.message:
             raise Exception(response.error.message)
 
+        # OCR 결과 텍스트 추출
         annotations = response.text_annotations
         result_text = annotations[0].description.strip() if annotations else ""
 
@@ -55,7 +58,7 @@ async def run_ocr_preview(file: UploadFile):
             "status": "success",
             "text": result_text or "",
             "imageUrl": image_url,
-            "filename": filename,  # ✅ 삭제용
+            "filename": filename,  # 삭제용으로 전달
         }
 
     except Exception as e:
