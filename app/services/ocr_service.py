@@ -1,11 +1,13 @@
-# app/service/ocr_service.py
+# app/services/ocr_service.py
 import uuid
 from fastapi import UploadFile, HTTPException
 from google.cloud import vision, storage
 from google.oauth2 import service_account
 from app.core.config import settings
 
+# ----------------------------
 # GCP 인증
+# ----------------------------
 credentials = service_account.Credentials.from_service_account_file(
     settings.GOOGLE_APPLICATION_CREDENTIALS
 )
@@ -15,6 +17,10 @@ storage_client = storage.Client(credentials=credentials)
 # GCS 버킷 (필요 시 .env에서 관리)
 BUCKET_NAME = "sote-diary-uploads-2025"
 
+
+# ----------------------------
+# OCR 미리보기 실행 함수
+# ----------------------------
 async def run_ocr_preview(file: UploadFile):
     """
     1) 이미지를 GCS에 업로드
@@ -26,26 +32,33 @@ async def run_ocr_preview(file: UploadFile):
         ext = (file.filename or "img").split(".")[-1]
         filename = f"{uuid.uuid4()}.{ext}"
 
-        # 1) GCS 업로드
+        # 1️⃣ GCS 업로드
         bucket = storage_client.bucket(BUCKET_NAME)
         blob = bucket.blob(filename)
         blob.upload_from_file(file.file, content_type=file.content_type)
         image_url = f"https://storage.googleapis.com/{BUCKET_NAME}/{filename}"
 
-        # 2) Vision OCR
+        # 2️⃣ Vision OCR 수행
         content = blob.download_as_bytes()
         image = vision.Image(content=content)
         response = vision_client.text_detection(image=image)
-        annotations = response.text_annotations
-        text = annotations[0].description.strip() if annotations else ""
 
-        # 3) 저장하지 않고 그대로 반환
+        # Vision API 오류 발생 시
+        if response.error.message:
+            raise Exception(response.error.message)
+
+        # OCR 텍스트 추출
+        annotations = response.text_annotations
+        result_text = annotations[0].description.strip() if annotations else ""
+
+        # 3️⃣ 결과 반환 (Spring과 필드명 통일)
         return {
-            "message": "OCR preview generated",
-            "content": text,          
+            "status": "success",
+            "text": result_text or None,   # text" 필드명으로 통일
             "imageUrl": image_url,
         }
+
     except Exception as e:
+        # 예외 처리 및 FastAPI HTTPException 변환
+        print(f"[OCR ERROR] {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=f"OCR failed: {repr(e)}")
-
-

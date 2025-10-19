@@ -4,6 +4,8 @@ from app.services.stt_service import transcribe_audio
 from app.schemas.stt import STTResponse
 from app.core.config import settings
 from typing import Optional
+from datetime import datetime, timedelta, date
+from fastapi import HTTPException
 import io
 import os
 import shutil
@@ -19,10 +21,10 @@ from redis.asyncio import Redis
 
 router = APIRouter(prefix="/ai/stt", tags=["stt"])
 
-# ✅ ffmpeg 경로 설정 (.env > PATH > fallback)
+# ffmpeg 경로 설정 (.env > PATH > fallback)
 FFMPEG_BIN = settings.FFMPEG_BIN or shutil.which("ffmpeg") or "ffmpeg"
 
-# ✅ Redis 연결
+# Redis 연결
 redis = Redis(host="localhost", port=6379, decode_responses=True)
 
 
@@ -50,7 +52,8 @@ def get_current_user_id(authorization: str = Header(...)) -> int:
 async def check_stt_limit(user_id: int):
     today = date.today().isoformat()
     key = f"stt:{user_id}:{today}"
-
+    
+    # 이미 실행했는지 확인
     exists = await redis.exists(key)
     if exists:
         raise HTTPException(
@@ -58,8 +61,14 @@ async def check_stt_limit(user_id: int):
             detail="오늘은 이미 STT를 실행했습니다. 하루 1회만 가능합니다."
         )
 
-    # TTL = 24시간
-    await redis.set(key, "1", ex=60 * 60 * 24)
+    # 자정까지 남은 초 계산
+    now = datetime.now()
+    midnight = datetime.combine(now.date() + timedelta(days=1), datetime.min.time())
+    seconds_until_midnight = int((midnight - now).total_seconds())
+
+    # TTL을 자정까지로 설정
+    await redis.set(key, "1", ex=seconds_until_midnight)
+    print(f"[STT LIMIT] {key} 저장 완료 (자정까지 {seconds_until_midnight}초 TTL)")
 
 
 # ----------------------------
@@ -118,7 +127,7 @@ async def transcribe(
     content_type = (file.content_type or "").lower()
     allowed_types = {
         "audio/wav", "audio/x-wav", "audio/m4a", "audio/mp4",
-        "audio/mpeg", "audio/ogg", "application/octet-stream"
+        "audio/mpeg", "audio/ogg", "audio/webm", "application/octet-stream"
     }
     if content_type not in allowed_types:
         raise HTTPException(status_code=415, detail=f"지원하지 않는 파일 타입: {file.content_type or 'unknown'}")
@@ -149,7 +158,7 @@ async def transcribe(
             stt_provider=(stt_provider or "openai").lower(),
         )
 
-        # ✅ Spring /stt/results 저장
+        # Spring /stt/results 저장
         if getattr(settings, "SEND_STT_TO_SPRING", False):
             auth_header = request.headers.get("Authorization")
             headers = {"Content-Type": "application/json"}
@@ -162,7 +171,7 @@ async def transcribe(
                 }
                 r = requests.post(
                     settings.SPRING_STT_URL,
-                    json=payload,  # ✅ json으로 전달
+                    json=payload,  # json으로 전달
                     headers=headers,
                     timeout=5
                 )
