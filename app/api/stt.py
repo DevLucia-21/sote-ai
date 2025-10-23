@@ -107,6 +107,7 @@ def convert_to_wav_16k_mono(input_bytes: bytes, in_ext: str) -> bytes:
 async def transcribe(
     request: Request,
     file: UploadFile = File(...),   # 반드시 form-data → file 로 업로드
+    uid: str = Form(...),           #  JWT 대신 uid 직접 받음
     diary_date: Optional[str] = Form(None),
     stt_provider: Optional[str] = Query(None, description="whisper 또는 openai"),
     model_name: Optional[str] = Query(None),
@@ -114,16 +115,34 @@ async def transcribe(
     low_conf_retranscribe: bool = Query(True),
     low_conf_threshold: float = Query(-1.0),
     timeout_seconds: float = Query(30.0),
-    user_id: int = Depends(get_current_user_id)  # JWT에서 userId 추출
 ):
     """
     STT 변환 (파일 업로드 필수, 하루 1회 제한)
     FastAPI → STT 변환 → Spring /stt/results 저장
     Diary 저장은 자동으로 하지 않음 (사용자 수정 후 별도 호출)
     """
-    # 하루 1회 제한 체크
-    await check_stt_limit(user_id)
 
+    # ----------------------------
+    #  하루 1회 제한 체크 (uid 기준)
+    # ----------------------------
+    today = date.today().isoformat()
+    key = f"stt:{uid}:{today}"
+    exists = await redis.exists(key)
+    if exists:
+        raise HTTPException(
+            status_code=403,
+            detail="오늘은 이미 STT를 실행했습니다. 하루 1회만 가능합니다."
+        )
+
+    now = datetime.now()
+    midnight = datetime.combine(now.date() + timedelta(days=1), datetime.min.time())
+    seconds_until_midnight = int((midnight - now).total_seconds())
+    await redis.set(key, "1", ex=seconds_until_midnight)
+    print(f"[STT LIMIT] {key} 저장 완료 (자정까지 {seconds_until_midnight}초 TTL)")
+
+    # ----------------------------
+    # 오디오 파일 변환 및 STT 실행
+    # ----------------------------
     content_type = (file.content_type or "").lower()
     allowed_types = {
         "audio/wav", "audio/x-wav", "audio/m4a", "audio/mp4",
@@ -158,17 +177,17 @@ async def transcribe(
             stt_provider=(stt_provider or "openai").lower(),
         )
 
+        # ----------------------------
         # Spring /stt/results 저장
+        # ----------------------------
         if getattr(settings, "SEND_STT_TO_SPRING", False):
-            auth_header = request.headers.get("Authorization")
-            headers = {"Content-Type": "application/json"}
-            if auth_header:
-                headers["Authorization"] = auth_header
             try:
                 payload = {
+                    "uid": uid,  # userId 대신 uid 전달
                     "text": str(result.get("text", "")),
                     "diaryDate": diary_date or str(date.today())
                 }
+                headers = {"Content-Type": "application/json"}
                 r = requests.post(
                     settings.SPRING_STT_URL,
                     json=payload,  # json으로 전달
