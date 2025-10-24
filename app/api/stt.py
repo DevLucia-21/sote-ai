@@ -1,5 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Request
 from app.services.stt_service import transcribe_audio
+from app.schemas.stt import STTResponse
 from app.core.config import settings
 from typing import Optional
 from datetime import datetime, timedelta, date, timezone
@@ -73,7 +74,7 @@ def convert_to_wav_16k_mono(input_bytes: bytes, in_ext: str) -> bytes:
 # ----------------------------
 # STT 변환 API (JWT 없음)
 # ----------------------------
-@router.post("/transcribe")
+@router.post("/transcribe", response_model=STTResponse)
 async def transcribe(
     request: Request,
     file: UploadFile = File(...),
@@ -146,10 +147,10 @@ async def transcribe(
                 r.raise_for_status()
                 print(f"[STT→Spring] 저장 완료 user_id={user_id}")
             except requests.Timeout:
-                print("[STT→Spring] ❌ 요청 시간 초과")
+                print("[STT→Spring]  요청 시간 초과")
                 raise HTTPException(status_code=504, detail="[STT → Spring] 요청 시간 초과")
             except requests.RequestException as e:
-                print(f"[STT→Spring] ❌ 실패: {e}")
+                print(f"[STT→Spring]  실패: {e}")
                 raise HTTPException(status_code=500, detail=f"[STT → Spring 저장 실패] {e}")
 
     
