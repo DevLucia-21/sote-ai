@@ -23,18 +23,13 @@ class STTRequest(BaseModel):
     prefer_first: Optional[bool] = None      # True: small-first, False: primary-first
     compute_type: Optional[str] = None       # "int8" 등(설정값 오버라이드용, 선택)
     user_id: Optional[int] = None    # 변경: UID 추가
+    spring_id: Optional[int] = None  
 
 
 # STT 결과 응답
 class STTResponse(BaseModel):
     text: str
-    model_name: Optional[str] = None         # 사용된 모델 크기(e.g., "small")
-    device: Optional[str] = None             # "cpu" | "cuda"
-    compute_type: Optional[str] = None       # "int8" | "int8_float16" | "float16" ...
-    language: Optional[str] = None           # 감지/사용된 언어
-    duration_seconds: Optional[float] = None
-    segments: Optional[List[Segment]] = None
-    note: Optional[str] = None               # 추가 메시지(폴백·보정 여부 등)
-    audio_url: Optional[str] = None
-    user_id: Optional[int] = None    # 변경: UID 추가
-
+    model_name: Optional[str] = None   # 사용된 모델명 (선택 노출)
+    note: Optional[str] = None         # 추가 메시지/디버그
+    user_id: Optional[int] = None      # 요청한 UID (에코백)
+    spring_id: Optional[int] = None    # Spring STT 전용 테이블 PK (저장 시에만 포함)

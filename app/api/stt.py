@@ -160,12 +160,15 @@ async def transcribe(
                 print(f"[STT→Spring] 실패: {e}")
                 raise HTTPException(status_code=500, detail=f"[STT → Spring 저장 실패] {e}")
 
-        # FastAPI 응답에 spring_id 포함
+        # 최소 필드만 응답
         return {
             "text": result.get("text", ""),
-            "note": result.get("note", "") + " | DEBUG: STT 변환 및 Spring 저장 완료",
-            "spring_id": spring_id  #프론트에서 undefined 방지
+            "model_name": result.get("model_name"),  # 필요 없으면 프론트에서 무시
+            "note": (result.get("note") or "STT 변환 완료") + (" | Spring 저장 완료" if spring_id is not None else ""),
+            "user_id": user_id,
+            "spring_id": spring_id,  # 저장하지 않았으면 응답에서 생략됨(response_model_exclude_none)
         }
+
 
     except Exception as e:
         print(f"[STT ERROR] {e}")
