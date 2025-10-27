@@ -1,3 +1,4 @@
+# app/api/stt.py
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Request
 from app.services.stt_service import transcribe_audio
 from app.schemas.stt import STTResponse
@@ -128,6 +129,8 @@ async def transcribe(
         )
         print(f"[STT DONE] 텍스트 길이={len(result.get('text', ''))}")
 
+        spring_id = None  # Spring에서 반환된 id 초기화
+
         # Spring 서버로 결과 전송
         if getattr(settings, "SEND_STT_TO_SPRING", False):
             payload = {
@@ -145,18 +148,23 @@ async def transcribe(
                 )
                 print(f"[STT→Spring] 응답 코드: {r.status_code}")
                 r.raise_for_status()
-                print(f"[STT→Spring] 저장 완료 user_id={user_id}")
+
+                # Spring이 반환한 id 추출
+                spring_id = r.json()
+                print(f"[STT→Spring] 저장 완료 user_id={user_id}, id={spring_id}")
+
             except requests.Timeout:
-                print("[STT→Spring]  요청 시간 초과")
+                print("[STT→Spring] 요청 시간 초과")
                 raise HTTPException(status_code=504, detail="[STT → Spring] 요청 시간 초과")
             except requests.RequestException as e:
-                print(f"[STT→Spring]  실패: {e}")
+                print(f"[STT→Spring] 실패: {e}")
                 raise HTTPException(status_code=500, detail=f"[STT → Spring 저장 실패] {e}")
 
-    
+        # FastAPI 응답에 spring_id 포함
         return {
             "text": result.get("text", ""),
-            "note": result.get("note", "") + " | DEBUG: STT 변환 및 Spring 저장 완료"
+            "note": result.get("note", "") + " | DEBUG: STT 변환 및 Spring 저장 완료",
+            "spring_id": spring_id  #프론트에서 undefined 방지
         }
 
     except Exception as e:
