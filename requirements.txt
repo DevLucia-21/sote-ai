@@ -29,5 +29,5 @@ pydantic
 google-cloud-vision
 python-multipart
 pyjwt
-pydantic-settingss
+pydantic-settings
 PyJWT
