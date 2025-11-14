@@ -6,32 +6,36 @@ pydantic-settings
 pydub
 psutil
 aiofiles
-faster-whisper
-ctranslate2
+
+# Whisper
+faster-whisper==0.10.0
+ctranslate2==3.24.0
+
+# NLP
 kss
 pecab
-numpy
+numpy==1.24.4
 mecab-python3
 ffmpeg-python
 
 # Google Cloud
 google-cloud-vision==3.10.2
-google-api-core==2.25.1
-google-auth==2.40.3
-googleapis-common-protos==1.70.0
-grpcio==1.74.0
-grpcio-status==1.74.0
-protobuf==4.25.3
+google-api-core==2.17.1
+google-auth==2.22.0
+googleapis-common-protos==1.59.1
+grpcio==1.58.0
+grpcio-status==1.58.0
+protobuf==4.23.4
 
-# 요청/통신
+# Network
 requests
 httpx
 
+# pydantic v2 안정 버전
+pydantic==2.8.2
+
 # JWT
-PyJWT
+PyJWT==2.8.0
 
-# Pydantic
-pydantic>=2.0
-
-# OpenAI API (필수)
+# OpenAI 최신 API
 openai>=1.40.0
