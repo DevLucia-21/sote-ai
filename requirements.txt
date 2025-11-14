@@ -39,3 +39,5 @@ PyJWT==2.8.0
 
 # OpenAI 최신 API
 openai>=1.40.0
+
+redis==5.0.1
