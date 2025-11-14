@@ -20,6 +20,7 @@ ffmpeg-python
 
 # Google Cloud
 google-cloud-vision==3.10.2
+google-cloud-storage==2.18.2
 google-api-core==2.17.1
 google-auth==2.22.0
 googleapis-common-protos==1.59.1
