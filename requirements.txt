@@ -1,44 +1,62 @@
-fastapi
-uvicorn[standard]
-python-multipart
-python-dotenv
-pydantic-settings
-pydub
-psutil
-aiofiles
+####################################
+# Core
+####################################
+fastapi==0.110.1
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+python-dotenv==1.0.1
+pydantic==2.8.2
+pydantic-settings==2.2.1
+psutil==5.9.8
+aiofiles==23.2.1
+requests==2.31.0
+httpx==0.27.0
+PyJWT==2.8.0
 
-# Whisper
+####################################
+# Whisper / STT
+####################################
 faster-whisper==1.0.2
 ctranslate2==4.6.0
 
-# NLP
-kss
-pecab
+####################################
+# NLP / MECAB
+####################################
+kss==4.5.4
+pecab==1.0.8
+mecab-python3==1.0.8
 numpy==1.24.4
-mecab-python3
-ffmpeg-python
+ffmpeg-python==0.2.0
 
-# Google Cloud
+####################################
+# Google Cloud Vision (호환 세트)
+####################################
 google-cloud-vision==3.10.2
-google-cloud-storage==2.18.2
 google-api-core==2.17.1
 google-auth==2.22.0
 googleapis-common-protos==1.59.1
+
+# gRPC 패밀리 (google-cloud-vision 호환 세트)
 grpcio==1.58.0
 grpcio-status==1.58.0
 protobuf==4.23.4
 
-# Network
-requests
-httpx
+####################################
+# GCP Storage
+####################################
+google-cloud-storage==2.18.2
 
-# pydantic v2 안정 버전
-pydantic==2.8.2
+####################################
+# Redis
+####################################
+redis==5.0.1
 
-# JWT
-PyJWT==2.8.0
-
-# OpenAI 최신 API
+####################################
+# OpenAI
+####################################
 openai>=1.40.0
 
-redis==5.0.1
+####################################
+# Image (OCR preview 등)
+####################################
+Pillow==11.0.0

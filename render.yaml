@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: sote-ai
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+
+    envVars:
+      - key: PORT
+        value: 10000
+
+      # GOOGLE_APPLICATION_CREDENTIALS JSON을 환경변수로 넣을 경우
+      - key: GOOGLE_CREDENTIALS_JSON
+        sync: false
+
+      # OpenAI 키
+      - key: OPENAI_API_KEY
+        sync: false
+
+      # Redis URL
+      - key: REDIS_URL
+        sync: false
