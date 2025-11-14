@@ -8,16 +8,6 @@ from fastapi.staticfiles import StaticFiles
 
 import os
 
-cred_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
-if cred_json:
-    tmp_path = "/tmp/google-credentials.json"
-    with open(tmp_path, "w") as f:
-        f.write(cred_json)
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tmp_path
-    print("[INFO] GOOGLE_APPLICATION_CREDENTIALS set to /tmp/google-credentials.json")
-else:
-    print("[WARN] GOOGLE_CREDENTIALS_JSON is missing. GCP/Firebase will not work.")
-
 # 라우터 임포트
 from app.api.stt import router as stt_router
 from app.api.analysis import router as analysis_router

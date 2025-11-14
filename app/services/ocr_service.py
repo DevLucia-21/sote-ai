@@ -3,13 +3,41 @@ from fastapi import UploadFile, HTTPException
 from google.cloud import vision, storage
 from google.oauth2 import service_account
 from app.core.config import settings
+import os
+import json
 
-# ----------------------------
-# GCP 인증
-# ----------------------------
-credentials = service_account.Credentials.from_service_account_file(
-    settings.GOOGLE_APPLICATION_CREDENTIALS
-)
+# ===========================
+# GCP Credentials 자동 로드
+# ===========================
+
+credentials = None
+
+# 1) Render 환경: GOOGLE_CREDENTIALS_JSON은 JSON 문자열
+cred_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+
+if cred_json:
+    try:
+        # 문자열을 dict 로 파싱
+        info = json.loads(cred_json)
+        credentials = service_account.Credentials.from_service_account_info(info)
+        print("[GCP] Loaded credentials from GOOGLE_CREDENTIALS_JSON")
+    except Exception as e:
+        print("[GCP ERROR] Failed to load GOOGLE_CREDENTIALS_JSON:", e)
+
+# 2) 로컬 환경: GOOGLE_APPLICATION_CREDENTIALS 경로 사용
+elif settings.GOOGLE_APPLICATION_CREDENTIALS:
+    try:
+        credentials = service_account.Credentials.from_service_account_file(
+            settings.GOOGLE_APPLICATION_CREDENTIALS
+        )
+        print(f"[GCP] Loaded credentials from file: {settings.GOOGLE_APPLICATION_CREDENTIALS}")
+    except Exception as e:
+        print("[GCP ERROR] Failed to load credentials file:", e)
+
+# 3) 둘 다 없으면 에러
+if not credentials:
+    raise RuntimeError("No valid GCP credentials found. Check environment variables.")
+
 vision_client = vision.ImageAnnotatorClient(credentials=credentials)
 storage_client = storage.Client(credentials=credentials)
 
