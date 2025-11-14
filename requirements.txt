@@ -13,21 +13,25 @@ pecab
 numpy
 mecab-python3
 ffmpeg-python
+
+# Google Cloud
 google-cloud-vision==3.10.2
 google-api-core==2.25.1
 google-auth==2.40.3
 googleapis-common-protos==1.70.0
 grpcio==1.74.0
 grpcio-status==1.74.0
-protobuf==6.31.1
-Pillow==11.3.0
-fastapi
-uvicorn
+protobuf==4.25.3
+
+# 요청/통신
 requests
 httpx
-pydantic
-google-cloud-vision
-python-multipart
-pyjwt
-pydantic-settings
+
+# JWT
 PyJWT
+
+# Pydantic
+pydantic>=2.0
+
+# OpenAI API (필수)
+openai>=1.40.0
