@@ -50,12 +50,7 @@ app.include_router(stt_router)
 app.include_router(analysis_router)
 app.include_router(ocr_router)
 
-# 정적 파일 서빙
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
 #  헬스체크
-
 @app.get("/")
 def root():
     return {"status": "ok", "service": "sote-ai"}
