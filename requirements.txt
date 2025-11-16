@@ -1,34 +1,40 @@
+# Core
 fastapi
 uvicorn[standard]
 python-multipart
 python-dotenv
+pydantic
 pydantic-settings
 pydub
 psutil
 aiofiles
+requests
+httpx
+PyJWT
+
+# Whisper / STT
 faster-whisper
 ctranslate2
+
+# NLP / MECAB / 기타
 kss
 pecab
-numpy
 mecab-python3
+numpy
 ffmpeg-python
+
+# Google Cloud / Vision
 google-cloud-vision==3.10.2
 google-api-core==2.25.1
 google-auth==2.40.3
 googleapis-common-protos==1.70.0
+
 grpcio==1.74.0
 grpcio-status==1.74.0
 protobuf==6.31.1
+
+# Redis
+redis==5.0.1
+
+# Image
 Pillow==11.3.0
-fastapi
-uvicorn
-requests
-httpx
-pydantic
-google-cloud-vision
-dlrj
-python-multipart
-pyjwt
-pydantic-settingss
-PyJWT
