@@ -19,8 +19,11 @@ FFMPEG_BIN = settings.FFMPEG_BIN or shutil.which("ffmpeg") or "ffmpeg"
 # ----------------------------
 # Redis 연결
 # ----------------------------
-redis = Redis(host="localhost", port=6379, decode_responses=True)
-
+redis = Redis(
+    host="red-d4cvsck9c44c73937brg",
+    port=6379,
+    decode_responses=True
+)
 
 # ----------------------------
 # STT 하루 1회 제한 (Redis)

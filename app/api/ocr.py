@@ -7,7 +7,11 @@ from app.core.config import settings
 # ----------------------------
 # Redis 연결
 # ----------------------------
-redis = Redis(host="localhost", port=6379, decode_responses=True)
+redis = Redis(
+    host="red-d4cvsck9c44c73937brg",
+    port=6379,
+    decode_responses=True
+)
 
 router = APIRouter(prefix="/ocr", tags=["ocr"])
 
