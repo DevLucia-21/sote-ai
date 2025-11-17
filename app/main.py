@@ -8,6 +8,12 @@ from fastapi.staticfiles import StaticFiles
 
 import os
 
+# -------------------------------------------
+# 반드시 필요한 GCP Credentials 경로 지정
+# Dockerfile에서 생성하는 경로와 동일해야 함
+# -------------------------------------------
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/app/config/gcp-ocr.json"
+
 # 라우터 임포트
 from app.api.stt import router as stt_router
 from app.api.analysis import router as analysis_router
@@ -20,7 +26,6 @@ logger = logging.getLogger("sote.main")
 app = FastAPI(title="Sote AI API")
 
 # CORS 설정
-# 개발 환경에서는 localhost, 운영 환경에서는 도메인만 허용
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -29,7 +34,7 @@ origins = [
     "https://fastapi.sote.kr"
 ]
 
-# 운영일 때는 위 도메인만, 개발일 때는 전체 허용
+# 운영/개발 구분
 if settings.ENVIRONMENT != "production":
     allow_origins = ["*"]
 else:
@@ -43,14 +48,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#  라우터 등록
-# stt_router 내부에 이미 prefix="/ai/stt" 존재하므로,
-# 여기서는 prefix를 추가하지 않아야 함 (중복 방지)
+# 라우터 등록
 app.include_router(stt_router)
 app.include_router(analysis_router)
 app.include_router(ocr_router)
 
-#  헬스체크
+# 헬스체크
 @app.get("/")
 def root():
     return {"status": "ok", "service": "sote-ai"}
