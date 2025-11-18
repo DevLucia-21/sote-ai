@@ -101,8 +101,13 @@ async def transcribe(
     # 파일 타입 검증
     content_type = (file.content_type or "").lower()
     allowed_types = {
-        "audio/wav", "audio/x-wav", "audio/m4a", "audio/mp4",
-        "audio/mpeg", "audio/ogg", "audio/webm", "application/octet-stream"
+        "audio/wav", "audio/x-wav",
+        "audio/m4a", "audio/x-m4a",               
+        "audio/mp4",
+        "audio/mpeg",
+        "audio/ogg",
+        "audio/webm",
+        "application/octet-stream"
     }
     if content_type not in allowed_types:
         raise HTTPException(status_code=415, detail=f"지원하지 않는 파일 타입: {file.content_type}")

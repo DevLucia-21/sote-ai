@@ -1,5 +1,5 @@
 ###########################################################
-#SOTE-AI Dockerfile (Render + Base64 JSON 완벽 지원)
+# SOTE-AI Dockerfile (Render + Base64 JSON 완벽 지원)
 ###########################################################
 
 # 1) Base Image
@@ -33,16 +33,15 @@ ENV PORT=10000
 EXPOSE 10000
 
 ###########################################################
-# 7) Base64로 전달된 GOOGLE_CREDENTIALS_JSON을 
+# 7) Base64로 전달된 GOOGLE_CREDENTIALS_JSON을
 #    컨테이너 내 /app/config/gcp-ocr.json 으로 생성
-#    → Google Cloud Vision OCR, GCS 업로드 사용
+#    (Google Cloud Vision OCR 실행용)
 ###########################################################
 RUN mkdir -p /app/config
 
 CMD sh -c "\
   echo \"===== Creating GCP Credentials File =====\" && \
   echo \"$GOOGLE_CREDENTIALS_JSON\" | base64 -d > /app/config/gcp-ocr.json && \
-  export GOOGLE_APPLICATION_CREDENTIALS=/app/config/gcp-ocr.json && \
   echo \"===== Starting SOTE-AI =====\" && \
   uvicorn app.main:app --host 0.0.0.0 --port 10000 \
 "
