@@ -26,12 +26,13 @@ logger = logging.getLogger("sote.main")
 app = FastAPI(title="Sote AI API")
 
 # CORS 설정
+# CORS 설정
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "https://sote.kr",
     "https://app.sote.kr",
-    "https://fastapi.sote.kr"
+    "https://fastapi.sote.kr",
 ]
 
 # 운영/개발 구분
@@ -40,9 +41,11 @@ if settings.ENVIRONMENT != "production":
 else:
     allow_origins = origins
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app$", 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
