@@ -22,8 +22,12 @@ WORKDIR /app
 # 4) Install Python Dependencies
 COPY requirements.txt .
 
+# 🚨 핵심 수정: hash 체크 방지 + build isolation 제거
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir \
+        --no-build-isolation \
+        --disable-pip-version-check \
+        -r requirements.txt
 
 # 5) Copy application source
 COPY . .
@@ -33,9 +37,7 @@ ENV PORT=10000
 EXPOSE 10000
 
 ###########################################################
-# 7) Base64로 전달된 GOOGLE_CREDENTIALS_JSON을
-#    컨테이너 내 /app/config/gcp-ocr.json 으로 생성
-#    (Google Cloud Vision OCR 실행용)
+# 7) Base64로 전달된 GOOGLE_CREDENTIALS_JSON을 파일로 생성
 ###########################################################
 RUN mkdir -p /app/config
 
