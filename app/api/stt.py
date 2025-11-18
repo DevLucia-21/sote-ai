@@ -159,7 +159,14 @@ async def transcribe(
 
                 # Spring이 반환한 id 추출
                 response_json = r.json()
-                spring_id = response_json.get("id")
+
+                spring_id = None
+                if isinstance(response_json, dict):
+                    if "data" in response_json and isinstance(response_json["data"], dict):
+                        spring_id = response_json["data"].get("id")
+                    else:
+                        spring_id = response_json.get("id")
+
                 print(f"[STT→Spring] 저장 완료 user_id={user_id}, id={spring_id}")
 
             except requests.Timeout:
