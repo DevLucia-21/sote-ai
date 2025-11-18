@@ -2,7 +2,6 @@ services:
   - type: web
     name: sote-ai
     env: docker
-    plan: free
     dockerfilePath: ./Dockerfile
     autoDeploy: true
 
