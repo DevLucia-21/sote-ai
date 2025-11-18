@@ -158,7 +158,8 @@ async def transcribe(
                 r.raise_for_status()
 
                 # Spring이 반환한 id 추출
-                spring_id = r.json()
+                response_json = r.json()
+                spring_id = response_json.get("id")
                 print(f"[STT→Spring] 저장 완료 user_id={user_id}, id={spring_id}")
 
             except requests.Timeout:
