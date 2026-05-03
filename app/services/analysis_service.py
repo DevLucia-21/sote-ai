@@ -27,6 +27,10 @@ from typing import Optional, List, Tuple
 from openai import OpenAI
 from app.core.config import settings
 
+# -------------------- OpenAI Model --------------------
+OPENAI_ANALYSIS_MODEL = "gpt-5.4-mini"
+MAX_ANALYSIS_OUTPUT_TOKENS = 900
+
 # -------------------- OpenAI Client --------------------
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
@@ -348,6 +352,41 @@ def _format_korean_reason_sentence(reason_parts: dict) -> str:
     else:
         return f'{summary}. 그래서 {interp}.'
 
+def _diversify_music_candidates(candidates: List[dict]) -> List[dict]:
+    """
+    같은 가수/같은 소분류가 반복되는 추천을 줄인다.
+    완전 제거가 아니라, 다양한 후보를 먼저 배치한다.
+    """
+    selected = []
+    used_artists = set()
+    used_subgenres = set()
+
+    for c in candidates:
+        artist = (c.get("artist") or "").strip().lower()
+        genre = (c.get("genre") or "").strip().lower()
+        sub = genre.split("/", 1)[1] if "/" in genre else genre
+
+        if artist in used_artists:
+            continue
+        if sub in used_subgenres:
+            continue
+
+        selected.append(c)
+        used_artists.add(artist)
+        used_subgenres.add(sub)
+
+        if len(selected) == 3:
+            break
+
+    if len(selected) < 3:
+        for c in candidates:
+            if c not in selected:
+                selected.append(c)
+            if len(selected) == 3:
+                break
+
+    return selected
+
 # -------------------- 메인 API --------------------
 def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> dict:
     """
@@ -408,75 +447,91 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
 
     # -------- System 지침 --------
     system_instructions = f"""
-    너는 한국 사용자를 위한 '일기 감정 분석 + 음악 추천' 전문가다.
-    반드시 JSON만 출력한다(텍스트/설명/코드블록 금지).
+    너는 한국 사용자를 위한 일기 감정 분석 및 음악 추천 엔진이다.
+    반드시 JSON만 출력한다. 설명, 코드블록, 마크다운은 금지한다.
 
     사용자 정보:
     - 출생연도: {year}
-    - 현재 나이: 약 {age}세 ({age_group})
-    - 나이대 가이드: {age_guide}
+    - 현재 나이대: {age_group}
     - 선호 대분류: {preferred_text}
+    - 감지된 컨텍스트: [{contexts_text}]
 
-    정확성:
-    - 음악 메타데이터(가수/앨범/장르)가 불확실하면 그 곡을 버리고 신뢰되는 대중적 곡을 선택.
-    - 장르는 반드시 '대분류/소분류' 표기(예: pop/pop-ballad, electronic/ambient).
-    - 템포는 '느림/중간/빠름 + 대략 BPM'.
+    작업:
+    1. 일기에서 감정을 하나만 고른다.
+    2. 감정 라벨은 반드시 다음 중 하나다: 기쁨, 슬픔, 화남, 무기력, 예민
+    3. 감정 강도 score는 0.0~1.0 사이 실수로 작성한다.
+    4. 음악 후보는 정확히 3곡 추천한다.
 
-    상황 일치(매우 중요):
-    - 곡의 '주제/가사/용도'가 일기의 '상황'과 맞아야 한다.
-    - 일기에 연애/이별 단서가 없으면 사랑/로맨스/실연 테마 금지.
-    - 공부/집중이면 저가사·저에너지 위주, 에너지/운동이면 업비트 허용, 차분/휴식이면 잔잔한 계열 선호.
+    감정 분석 규칙:
+    - 일기의 실제 단서에 근거한다.
+    - 과장된 위로, 상담사 말투, 진단성 표현은 피한다.
+    - 긍정과 부정이 섞이면 가장 강한 정서를 선택하되, reason_parts에는 섞인 감정을 자연스럽게 반영한다.
+    - reason_parts.summary는 '~했구나'로 끝낸다.
+    - reason_parts.clues는 일기에서 보이는 핵심 단서 1~3개만 넣는다.
+    - reason_parts.interpretation은 '~인 것 같아'로 끝낸다.
 
-    선호 대분류(우선, 강제 아님):
-    - 감정 점수가 낮거나 중간(score < {PREFERRED_FORCE_THRESHOLD:.2f})이면 가능한 한 선호 대분류에서 선택.
-    - 감정 점수가 높으면(≥ {PREFERRED_FORCE_THRESHOLD:.2f}) 선호를 벗어나도 상황/감정 적합성을 우선.
+    음악 추천 다양성 규칙:
+    - 3곡은 서로 다른 분위기 또는 다른 소분류여야 한다.
+    - 같은 감정이어도 매번 비슷한 발라드/잔잔한 곡만 추천하지 않는다.
+    - 너무 유명한 기본 추천곡만 반복하지 말고, 대중적으로 확인 가능한 곡 안에서 다양하게 고른다.
+    - 같은 artist를 중복 추천하지 않는다.
+    - 같은 album을 중복 추천하지 않는다.
+    - genre의 sub 값이 3곡 모두 완전히 같으면 안 된다.
+    - mood도 3곡 모두 같은 단어로 쓰지 않는다.
 
-    감지된 컨텍스트: [{contexts_text}]
-    {subgenre_hint_text}
+    상황 일치 규칙:
+    - 일기에 연애/이별 단서가 없으면 사랑, 고백, 이별, 실연 중심 곡은 제외한다.
+    - 공부/집중 컨텍스트에서는 120BPM 이상의 고에너지 곡, EDM, festival 계열을 피한다.
+    - 휴식/차분 컨텍스트에서는 과하게 시끄러운 곡을 피한다.
+    - 무기력 감정에는 너무 처지는 곡만 고르지 말고, 한 곡은 가볍게 회복감을 주는 곡을 포함한다.
+    - 예민 감정에는 자극적인 곡보다 긴장을 낮추는 곡을 우선한다.
+    - 기쁨 감정에는 잔잔한 곡만 고르지 말고 밝거나 리듬감 있는 곡을 포함한다.
 
-    감정 분석:
-    - label은 '기쁨/슬픔/화남/무기력/예민' 중 단 하나.
-    - 긍정/부정이 섞이면 균형적으로 기술(극단적 어조 금지).
-    - score는 [0,1] 실수. 강도가 약하면 0.45~0.65 범위.
-    - 구어체 결과를 위해 아래 형식을 '반드시' 채워라.
+    선호 장르 반영:
+    - 선호 대분류가 있으면 최소 1곡은 선호 대분류에서 고른다.
+    - 단, 일기 상황과 맞지 않으면 선호보다 상황 적합성을 우선한다.
 
-    reason_parts 작성 규칙(JSON):
-    - reason_parts.summary: 한두 문장, 마지막은 반드시 '~했구나'로 끝낼 것. (예: "오늘 하루 종일 과제를 했구나")
-    - reason_parts.clues: 일기에서 핵심 단서 1~3개 배열, 각 항목 끝에 마침표/따옴표 금지. (예: ["혼자 랩실에 있었다", "방해받지 않았다"])
-    - reason_parts.interpretation: 한 문장, 마지막은 반드시 '…인 것 같아'로 끝낼 것. (예: "외로움과 편안함이 공존하는 상황인 것 같아")
+    출력 필드:
+    - emotion.label
+    - emotion.score
+    - emotion.reason_parts.summary
+    - emotion.reason_parts.clues
+    - emotion.reason_parts.interpretation
+    - music_candidates 배열 3개
+    - 각 music candidate는 title, artist, album, genre, tempo, mood, track_summary, reason을 포함한다.
 
-    음악 추천:
-    - 항상 2~3곡 후보를 제시한다.
-    - 각 곡은 title, artist, album, genre(대분류/소분류), tempo, mood, track_summary, reason을 가진다.
-    - track_summary: 곡 자체 한 줄 설명(주제/느낌/용도)
-    - music.reason은 '문장만' 작성하며, "일기와의 연결 이유:" 같은 접두사는 절대 붙이지 않는다.
-    - 모든 곡은 music_candidates 배열 안의 JSON 객체로 제공한다.
+    genre 규칙:
+    - genre는 반드시 '대분류/소분류' 형식이다.
+    - 예: pop/city-pop, jazz/bossa, electronic/downtempo, hiphop/lo-fi-hiphop
+
+    music.reason 규칙:
+    - "추천 이유:", "일기와의 연결 이유:" 같은 접두사는 쓰지 않는다.
+    - 한두 문장으로 작성한다.
     """
 
     # -------- User 프롬프트(입력/스키마) --------
     input_json = json.dumps({"text": text, "year": year, "preferred_genres": genres or []}, ensure_ascii=False)
 
     _output_schema = {
-    "emotion": {
-        "label": "기쁨/슬픔/화남/무기력/예민 중 하나(단일 라벨)",
-        "score": 0.0,
-        # 모델은 reason_parts를 채운다. (최종 reason 문자열로 합성)
-        "reason_parts": {
-            "summary": "…했구나",
-            "clues": ["단서1", "단서2"],
-            "interpretation": "…인 것 같아"
-        }
-    },
+        "emotion": {
+            "label": "기쁨|슬픔|화남|무기력|예민",
+            "score": 0.0,
+            "reason_parts": {
+                "summary": "...했구나",
+                "clues": ["단서1", "단서2"],
+                "interpretation": "...인 것 같아"
+            }
+        },
         "music_candidates": [
             {
                 "title": "곡 제목",
-                "artist": "가수 이름",
-                "album": "앨범명",
+                "artist": "가수",
+                "album": "앨범",
                 "genre": "대분류/소분류",
-                "tempo": "느림/중간/빠름 + 대략 BPM",
-                "mood": "곡의 분위기",
-                "track_summary": "이 곡 자체 한 줄 설명",
-                "reason": "일기와 왜 어울리는지 한두 문장 (접두사 금지)"
+                "tempo": "느림|중간|빠름 + BPM",
+                "mood": "곡 분위기",
+                "track_summary": "곡 설명",
+                "reason": "일기와 어울리는 이유"
             }
         ]
     }
@@ -490,9 +545,10 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
 
     def _call(messages: List[dict]) -> dict:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            response_format={"type": "json_object"},  # JSON만 허용
-            temperature=0.25,  # 정확/일관성 우선
+            model=OPENAI_ANALYSIS_MODEL,
+            response_format={"type": "json_object"},
+            temperature=0.45,
+            max_completion_tokens=MAX_ANALYSIS_OUTPUT_TOKENS,
             messages=messages,
         )
         content = resp.choices[0].message.content or ""
@@ -604,7 +660,7 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
         for c in normalized:
             c.pop("_prefer_penalty", None)
 
-        data["music_candidates"] = normalized[:3]  # 2~3곡 유지(혹시 많이 오면 3개로 컷)
+        data["music_candidates"] = _diversify_music_candidates(normalized)[:3] # 2~3곡 유지(혹시 많이 오면 3개로 컷)
 
     except Exception:
         # 파싱/검증 중 문제 발생 시 최초 결과 반환(필요하면 로깅)
