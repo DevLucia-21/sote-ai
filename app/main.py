@@ -56,3 +56,7 @@ app.include_router(debug_router)
 @app.get("/")
 def root():
     return {"status": "ok", "service": "sote-ai"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "service": "sote-ai"}
