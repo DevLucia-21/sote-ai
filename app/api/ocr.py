@@ -1,6 +1,5 @@
 from fastapi import APIRouter, UploadFile, Form, HTTPException, Query, Depends
 from app.services.ocr_service import run_ocr_preview, delete_ocr_image
-from app.core.security import verify_internal_ai_key
 
 from datetime import date, datetime, timedelta
 import os
