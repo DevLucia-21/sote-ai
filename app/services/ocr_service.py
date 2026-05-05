@@ -5,7 +5,7 @@ from google.cloud import vision, storage
 from google.oauth2 import service_account
 
 BUCKET_NAME = "sote-diary-uploads-2025"
-CREDENTIAL_PATH = "config/sote-push-4c5b62e27ca4.json"
+CREDENTIAL_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
 # ------------------------------------------
 # 1) 매 요청마다 GCP Client 생성 (정석)

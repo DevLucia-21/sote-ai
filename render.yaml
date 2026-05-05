@@ -10,7 +10,7 @@ services:
         value: 10000
 
       # GOOGLE_APPLICATION_CREDENTIALS JSON을 환경변수로 넣을 경우
-      - key: GOOGLE_CREDENTIALS_JSON
+      - key: GCP_OCR_JSON_BASE64
         sync: false
 
       # OpenAI 키

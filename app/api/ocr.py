@@ -1,15 +1,17 @@
 from fastapi import APIRouter, UploadFile, Form, HTTPException, Query
 from app.services.ocr_service import run_ocr_preview, delete_ocr_image
 from datetime import date, datetime, timedelta
+import os
 from redis.asyncio import Redis
 from app.core.config import settings
 
 # ----------------------------
 # Redis 연결
 # ----------------------------
-redis = Redis(
-    host="red-d4cvsck9c44c73937brg",
-    port=6379,
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+
+redis = Redis.from_url(
+    REDIS_URL,
     decode_responses=True
 )
 
