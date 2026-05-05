@@ -320,6 +320,41 @@ def _clean_reason_text(s: Optional[str]) -> str:
         return ""
     return _REASON_PREFIX_RE.sub("", s).strip()
 
+_EMOTION_REASON_FORBIDDEN_PATTERNS = [
+    r"음악 추천이 잘 되는지.*?[.!?。]?",
+    r"추천 결과를 기대.*?[.!?。]?",
+    r"테스트.*?(?:했구나|상태|문장|목적).*?[.!?。]?",
+    r"확인 목적.*?[.!?。]?",
+    r"기능 확인.*?[.!?。]?",
+    r"직접 표현함",
+    r"전반적으로",
+    r"문장임",
+    r"확인됨",
+    r"나타남",
+    r"분석됨",
+]
+
+def _sanitize_emotion_reason(reason: Optional[str], label: str = "") -> str:
+    text = (reason or "").strip()
+
+    for pattern in _EMOTION_REASON_FORBIDDEN_PATTERNS:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
+
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if not text or len(text) < 15:
+        if label == "기쁨":
+            return "오늘은 마음이 꽤 밝았구나. 가볍게 들뜬 표현에서 기분 좋은 에너지가 느껴지는 상태인 것 같아."
+        if label == "슬픔":
+            return "오늘은 마음이 조금 가라앉았구나. 쉽게 털어내기 어려운 감정이 남아 있던 상태인 것 같아."
+        if label == "화남":
+            return "오늘은 마음에 불편함이 쌓였구나. 그냥 넘기기 어려운 감정이 올라온 상태인 것 같아."
+        if label == "예민":
+            return "오늘은 생각이 많았구나. 작은 자극에도 마음이 쉽게 흔들릴 수 있는 상태인 것 같아."
+        return "오늘은 몸과 마음이 조금 무거웠구나. 쉬고 싶은 마음이 자연스럽게 커진 상태인 것 같아."
+
+    return text
+
 _INTERNAL_REASON_PATTERNS = [
     r"한국 곡.*?해외 곡.*?[.!?。]?",
     r"해외 곡.*?포함.*?[.!?。]?",
@@ -343,10 +378,21 @@ def _sanitize_music_reason(reason: Optional[str], mood: str = "", track_summary:
 
     text = re.sub(r"\s+", " ", text).strip()
 
-    if not text or len(text) < 12:
-        mood_text = (mood or "차분한 분위기").strip()
-        summary_text = (track_summary or "일기의 감정과 어울리는 곡").strip()
-        text = f"{mood_text} 분위기가 오늘의 감정과 자연스럽게 이어지고, {summary_text}."
+    # 너무 딱딱한 종결을 부드럽게 보정
+    replacements = {
+        "잘 어울린다.": "잘 어울려.",
+        "듣기 좋다.": "듣기 좋아.",
+        "이어준다.": "이어줘.",
+        "살려준다.": "살려줘.",
+        "풀어준다.": "풀어줘.",
+        "느껴진다.": "느껴져.",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    if not text or len(text) < 15:
+        mood_text = (mood or "부드러운").strip()
+        text = f"{mood_text} 분위기가 오늘의 감정과 자연스럽게 이어져서, 부담 없이 듣기 좋을 것 같아."
 
     return text
 
@@ -371,9 +417,13 @@ def _format_korean_reason_sentence(reason_parts: dict) -> str:
     if not isinstance(reason_parts, dict):
         return str(reason_parts)
 
-    summary = (reason_parts.get("summary") or "").strip()
-    interp  = (reason_parts.get("interpretation") or "").strip()
-    clues   = [c.strip() for c in (reason_parts.get("clues") or []) if c.strip()]
+    summary = re.sub(r"[.!?…]+\s*$", "", (reason_parts.get("summary") or "").strip())
+    interp  = re.sub(r"[.!?…]+\s*$", "", (reason_parts.get("interpretation") or "").strip())
+    clues   = [
+        re.sub(r'[\"\'\s]+$', "", str(c).strip())
+        for c in (reason_parts.get("clues") or [])
+        if str(c).strip()
+    ]
 
     if clues:
         # 유니코드 큰따옴표로 감싸기
@@ -568,12 +618,27 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
     4. 음악 후보는 정확히 3곡 추천한다.
 
     감정 분석 규칙:
-    - 일기의 실제 단서에 근거한다.
+    - 일기의 실제 감정 단서에 근거한다.
+    - 사용자가 테스트 목적으로 쓴 문장이라도 "테스트 중", "확인 목적", "기능 확인", "추천 결과를 기대" 같은 메타 표현은 emotion.reason에 쓰지 않는다.
+    - "직접 표현함", "전반적으로", "문장임", "나타남", "확인됨", "분석됨" 같은 보고서 말투를 쓰지 않는다.
+    - 사용자의 문장을 평가하지 말고, 사용자의 하루와 감정을 부드럽게 읽어주는 말투로 쓴다.
+    - reason_parts.summary는 자연스러운 1문장으로 쓰고 반드시 "~했구나"로 끝낸다.
+    - reason_parts.clues는 일기 속 표현을 짧게 옮기되, "라고 직접 표현함" 같은 분석 말투를 붙이지 않는다.
+    - reason_parts.interpretation은 자연스러운 1문장으로 쓰고 반드시 "~인 것 같아"로 끝낸다.
     - 과장된 위로, 상담사 말투, 진단성 표현은 피한다.
-    - 긍정과 부정이 섞이면 가장 강한 정서를 선택하되, reason_parts에는 섞인 감정을 자연스럽게 반영한다.
-    - reason_parts.summary는 '~했구나'로 끝낸다.
-    - reason_parts.clues는 일기에서 보이는 핵심 단서 1~3개만 넣는다.
-    - reason_parts.interpretation은 '~인 것 같아'로 끝낸다.
+    - 긍정/부정이 섞이면 가장 강한 정서를 고르되, reason에는 섞인 감정을 자연스럽게 반영한다.
+
+    좋은 emotion.reason 예:
+    - "오늘은 마음이 꽤 밝았구나. “기뻐”라는 말에서 가볍게 들뜬 기분이 느껴져서, 작은 순간도 즐겁게 받아들이는 상태인 것 같아."
+    - "오늘은 조금 지친 하루를 보냈구나. 계속 버티고 있다는 표현을 보니 몸도 마음도 쉬고 싶었던 상태인 것 같아."
+    - "오늘은 생각이 많았구나. 사소한 일에도 마음이 예민하게 반응해서 쉽게 가라앉지 않았던 것 같아."
+
+    나쁜 emotion.reason 예:
+    - "음악 추천이 잘 되는지 확인하면서 기쁘다고 했구나."
+    - "전반적으로 가벼운 확인 목적의 문장임을 보니..."
+    - "기쁨을 직접 표현함."
+    - "사용자의 문장에서 긍정 정서가 확인됨."
+    - "추천 결과를 기대하면서 기분이 밝아진 상태..."
 
     음악 추천 다양성 규칙:
     - 추천되는 3곡 자체가 서로 다른 artist, album, genre의 sub 값을 갖도록 고른다.
@@ -617,19 +682,25 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
     music.reason 규칙:
     - "추천 이유:", "일기와의 연결 이유:" 같은 접두사는 쓰지 않는다.
     - 한두 문장으로 작성한다.
-    - reason은 사용자의 일기 내용, 감정, 상황과 해당 곡의 분위기가 어떻게 연결되는지만 설명한다.
+    - 사용자의 일기 감정과 곡의 분위기가 어떻게 이어지는지 자연스럽게 설명한다.
+    - "~다"로 끝나는 딱딱한 설명문만 반복하지 않는다.
+    - 가능하면 "~해줘", "~어울려", "~좋을 것 같아", "~이어갈 수 있어"처럼 부드러운 문장으로 쓴다.
     - 추천 프로필, 큐레이션 전략, 장르 배치 전략을 reason에 직접 언급하지 않는다.
     - "한국 곡 두 곡 뒤에", "해외 곡으로", "3곡 구성", "단조롭지 않게", "선호 장르인", "다른 분위기를 더해", "전략", "프로필", "구성" 같은 내부 큐레이션 표현은 절대 쓰지 않는다.
     - 사용자가 볼 문장이므로 자연스러운 감상 문장으로 쓴다.
+    - 일기 본문에 없는 거창한 상황을 만들어내지 않는다.
 
     좋은 예:
-    "복잡했던 마음을 너무 무겁게 끌고 가지 않으면서, 리듬감 있게 기분을 조금 환기해주는 곡이다."
-    "조용히 가라앉은 하루의 분위기와 잘 맞고, 생각을 정리할 때 부담 없이 들을 수 있다."
+    - "밝아진 기분을 너무 과하게 끌어올리기보다, 산뜻한 리듬으로 가볍게 이어가기 좋아."
+    - "들뜬 마음은 살려주면서도 분위기가 부담스럽지 않아서, 지금 기분을 편하게 즐기기 좋을 것 같아."
+    - "조금 예민했던 마음을 세게 건드리지 않고, 천천히 풀어주는 흐름이라 잘 어울려."
+    - "가라앉은 기분을 억지로 바꾸기보다, 옆에서 조용히 맞춰주는 느낌으로 들을 수 있어."
 
     나쁜 예:
-    "한국 곡 두 곡 뒤에 넣기 좋은 해외 곡이다."
-    "선호 장르인 pop과도 맞고, 3곡 구성이 단조롭지 않게 해준다."
-    "이번 추천 프로필의 장르 전략에 맞는 곡이다."
+    - "한국 곡 두 곡 뒤에 넣기 좋은 해외 곡이다."
+    - "선호 장르인 pop과도 맞고, 3곡 구성이 단조롭지 않게 해준다."
+    - "기분 좋은 상태를 조금 더 여유롭게 이어가고 싶을 때 잘 어울린다."
+    - "밝지만 부드러운 흐름이라 부담 없이 듣기 좋다."
     """
 
     # -------- User 프롬프트(입력/스키마) --------
@@ -702,27 +773,16 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
             # reason_parts → reason 합성 (구어체: ~했구나 / …인 것 같아)
             rp = data["emotion"].get("reason_parts")
             if isinstance(rp, dict):
-                summary = (rp.get("summary") or "").strip()
-                clues   = rp.get("clues") or []
-                interp  = (rp.get("interpretation") or "").strip()
-
-                # 방어적 정리
-                summary = re.sub(r"[.!?…]+\s*$", "", summary)   # 끝부호 제거 (모델이 붙여도 정규화)
-                interp  = re.sub(r"[.!?…]+\s*$", "", interp)
-                # 단서 정리: 쉼표로 합치고 불필요한 부호 제거
-                clues = [re.sub(r'[\"\'\s]+$', '', str(c).strip()) for c in clues if str(c).strip()]
-                clues_text = ", ".join(clues)
-
-                if clues_text:
-                    particle = _choose_eul_reul(clues_text)
-                    reason = f"{summary}. {clues_text}{particle} 보니 {interp}."
-                else:
-                    reason = f"{summary}. 그래서 {interp}."
-                data["emotion"]["reason"] = reason
-                
-            # reason 템플릿 강제 변환
-            if isinstance(data["emotion"].get("reason"), str):
-                data["emotion"]["reason"] = _format_korean_reason_sentence(data["emotion"]["reason"])
+                reason = _format_korean_reason_sentence(rp)
+                data["emotion"]["reason"] = _sanitize_emotion_reason(
+                    reason,
+                    data["emotion"].get("label", ""),
+                )
+            elif isinstance(data["emotion"].get("reason"), str):
+                data["emotion"]["reason"] = _sanitize_emotion_reason(
+                    data["emotion"].get("reason"),
+                    data["emotion"].get("label", ""),
+                )
 
         # 감정 점수 파싱
         try:
