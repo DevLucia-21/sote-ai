@@ -4,14 +4,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 
-# 앱 설정
-from app.core.config import settings
-
 # Router import
 from app.api.stt import router as stt_router
 from app.api.analysis import router as analysis_router
 from app.api.ocr import router as ocr_router
-from app.api.debug import router as debug_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sote.main")
@@ -48,7 +44,6 @@ app.add_middleware(
 app.include_router(stt_router)
 app.include_router(analysis_router)
 app.include_router(ocr_router)
-app.include_router(debug_router)
 
 # ======================================================
 # 헬스 체크

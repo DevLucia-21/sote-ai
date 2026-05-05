@@ -418,15 +418,6 @@ def _sanitize_music_reason(reason: Optional[str], mood: str = "", track_summary:
 
     return text
 
-def _choose_eul_reul(s: str) -> str:
-    """끝 글자 받침에 따라 '을/를' 선택"""
-    if not s:
-        return "를"
-    code = ord(s[-1])
-    if 0xAC00 <= code <= 0xD7A3:
-        return "을" if (code - 0xAC00) % 28 else "를"
-    return "를"
-
 def _shorten_clue(clue: str, max_len: int = 12) -> str:
     clue = re.sub(r"[.!?…]+$", "", str(clue).strip())
     if len(clue) > max_len:

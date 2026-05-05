@@ -1,6 +1,6 @@
 # app/schemas/stt.py
 
-from typing import Optional, List
+from typing import Optional
 from pydantic import BaseModel
 
 # 단일 세그먼트(구간) 정보
