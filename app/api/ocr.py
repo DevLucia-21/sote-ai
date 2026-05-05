@@ -16,11 +16,7 @@ redis = Redis.from_url(
     decode_responses=True
 )
 
-router = APIRouter(
-    prefix="/ocr",
-    tags=["ocr"],
-    dependencies=[Depends(verify_internal_ai_key)],
-)
+router = APIRouter(prefix="/ocr", tags=["ocr"])
 
 # ----------------------------
 # OCR 하루 1회 제한 관련 함수 (Redis)
