@@ -21,6 +21,7 @@
 
 import json
 import re
+import random
 from datetime import datetime
 from typing import Optional, List, Tuple
 
@@ -29,7 +30,7 @@ from app.core.config import settings
 
 # -------------------- OpenAI Model --------------------
 OPENAI_ANALYSIS_MODEL = "gpt-5.4-mini"
-MAX_ANALYSIS_OUTPUT_TOKENS = 900
+MAX_ANALYSIS_OUTPUT_TOKENS = 1000
 
 # -------------------- OpenAI Client --------------------
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -354,26 +355,34 @@ def _format_korean_reason_sentence(reason_parts: dict) -> str:
 
 def _diversify_music_candidates(candidates: List[dict]) -> List[dict]:
     """
-    같은 가수/같은 소분류가 반복되는 추천을 줄인다.
+    같은 가수/같은 앨범/같은 소분류가 반복되는 추천을 줄인다.
     완전 제거가 아니라, 다양한 후보를 먼저 배치한다.
     """
     selected = []
     used_artists = set()
+    used_albums = set()
     used_subgenres = set()
 
     for c in candidates:
         artist = (c.get("artist") or "").strip().lower()
+        album = (c.get("album") or "").strip().lower()
         genre = (c.get("genre") or "").strip().lower()
         sub = genre.split("/", 1)[1] if "/" in genre else genre
 
-        if artist in used_artists:
+        if artist and artist in used_artists:
             continue
-        if sub in used_subgenres:
+        if album and album in used_albums:
+            continue
+        if sub and sub in used_subgenres:
             continue
 
         selected.append(c)
-        used_artists.add(artist)
-        used_subgenres.add(sub)
+        if artist:
+            used_artists.add(artist)
+        if album:
+            used_albums.add(album)
+        if sub:
+            used_subgenres.add(sub)
 
         if len(selected) == 3:
             break
@@ -386,6 +395,52 @@ def _diversify_music_candidates(candidates: List[dict]) -> List[dict]:
                 break
 
     return selected
+
+def _build_recommendation_profile() -> dict:
+    """
+    같은 감정 라벨이어도 매번 고정된 대표곡으로 수렴하지 않도록
+    추천 관점을 조금씩 바꾼다. 입력값 해시처럼 고정되는 값은 사용하지 않는다.
+    """
+    rng = random.SystemRandom()
+
+    return {
+        "era_mix": rng.choice(
+            [
+                "최신곡 2곡 + 2010년대 이후 곡 1곡",
+                "2010년대 곡 2곡 + 최신곡 1곡",
+                "사용자 세대에 익숙할 곡 1곡 + 최신/근작 2곡",
+                "시대를 섞되 같은 연도대에 몰리지 않게 구성",
+            ],
+        ),
+        "popularity_mix": rng.choice(
+            [
+                "너무 대표곡만 고르지 말고 대표곡 1곡 이하 + 덜 반복되는 곡 중심",
+                "대중적으로 확인 가능한 곡 안에서 중간 인지도 곡을 우선",
+                "익숙한 곡 1곡 + 새롭게 들을 만한 곡 2곡",
+            ],
+        ),
+        "language_mix": rng.choice(
+            [
+                "한국 곡 중심, 필요하면 해외 곡 1곡까지 허용",
+                "한국 곡 2곡 + 해외 곡 1곡까지 허용",
+                "국내/해외를 섞되 일기 정서와 사용자 선호를 우선",
+            ],
+        ),
+        "energy_arc": rng.choice(
+            [
+                "차분함, 회복감, 리듬감이 각각 드러나게 구성",
+                "감정 공감 1곡 + 전환/환기 1곡 + 정리/마무리 1곡",
+                "비슷한 템포로 몰지 말고 느림/중간 또는 중간/빠름을 섞기",
+            ],
+        ),
+        "genre_strategy": rng.choice(
+            [
+                "선호 장르 1~2곡 + 인접 장르 1곡",
+                "선호 장르 1곡 + 상황에 맞는 다른 장르 2곡",
+                "같은 대분류 안에서도 소분류를 분리하고, 가능하면 대분류도 섞기",
+            ],
+        ),
+    }
 
 # -------------------- 메인 API --------------------
 def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> dict:
@@ -432,7 +487,7 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
         age_guide = "최신 트렌디/밝은 곡을 우선 고려."
     elif age < 30:
         age_group = "20대"
-        age_guide = "감성적 발라드/인디 위주, 트렌디/잔잔 밸런스."
+        age_guide = "트렌디한 곡, 익숙한 곡, 새로운 장르를 균형 있게 고려."
     elif age < 40:
         age_group = "30대"
         age_guide = "차분한 팝/발라드, 안정적 분위기 선호."
@@ -444,6 +499,16 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
         age_guide = "향수/클래식/올드팝 고려, 과도한 강렬함 지양."
 
     preferred_text = ", ".join(preferred_majors) if preferred_majors else "특이사항 없음"
+    recommendation_profile = _build_recommendation_profile()
+    recommendation_profile_text = "\n".join(
+        [
+            f"- 시대 구성: {recommendation_profile['era_mix']}",
+            f"- 인지도 구성: {recommendation_profile['popularity_mix']}",
+            f"- 언어/지역 구성: {recommendation_profile['language_mix']}",
+            f"- 에너지 흐름: {recommendation_profile['energy_arc']}",
+            f"- 장르 전략: {recommendation_profile['genre_strategy']}",
+        ]
+    )
 
     # -------- System 지침 --------
     system_instructions = f"""
@@ -455,6 +520,16 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
     - 현재 나이대: {age_group}
     - 선호 대분류: {preferred_text}
     - 감지된 컨텍스트: [{contexts_text}]
+
+    세대/취향 가이드:
+    - {age_guide}
+
+    일기별 추천 프로필:
+    {recommendation_profile_text}
+
+    참고:
+    - 감지된 컨텍스트와 맞는 곡을 고르되, 아래 소분류 예시에 갇히지 않는다.
+    {subgenre_hint_text}
 
     작업:
     1. 일기에서 감정을 하나만 고른다.
@@ -471,13 +546,17 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
     - reason_parts.interpretation은 '~인 것 같아'로 끝낸다.
 
     음악 추천 다양성 규칙:
-    - 3곡은 서로 다른 분위기 또는 다른 소분류여야 한다.
+    - 추천되는 3곡 자체가 서로 다른 artist, album, genre의 sub 값을 갖도록 고른다.
+    - 3곡은 서로 다른 분위기 또는 다른 에너지 흐름을 가져야 한다.
     - 같은 감정이어도 매번 비슷한 발라드/잔잔한 곡만 추천하지 않는다.
     - 너무 유명한 기본 추천곡만 반복하지 말고, 대중적으로 확인 가능한 곡 안에서 다양하게 고른다.
+    - "힐링", "위로", "슬픔" 같은 넓은 감정 키워드에 매번 떠오르는 고정 추천곡은 피한다.
+    - 일기의 구체 단서(장소, 시간대, 활동, 관계, 날씨, 피로도)를 반영해 곡의 세대, 언어, 장르, 템포를 바꾼다.
+    - 3곡 중 최소 1곡은 너무 뻔한 대표곡 대신 인접 장르/다른 세대/다른 아티스트에서 고른다.
     - 같은 artist를 중복 추천하지 않는다.
     - 같은 album을 중복 추천하지 않는다.
-    - genre의 sub 값이 3곡 모두 완전히 같으면 안 된다.
-    - mood도 3곡 모두 같은 단어로 쓰지 않는다.
+    - genre의 sub 값이 3곡 모두 같으면 안 된다.
+    - mood도 같은 단어를 반복하지 않는다.
 
     상황 일치 규칙:
     - 일기에 연애/이별 단서가 없으면 사랑, 고백, 이별, 실연 중심 곡은 제외한다.
@@ -490,6 +569,7 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
     선호 장르 반영:
     - 선호 대분류가 있으면 최소 1곡은 선호 대분류에서 고른다.
     - 단, 일기 상황과 맞지 않으면 선호보다 상황 적합성을 우선한다.
+    - 선호 장르만 반복하지 말고, 선호 장르와 가까운 인접 장르도 후보에 섞는다.
 
     출력 필드:
     - emotion.label
@@ -510,7 +590,16 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
     """
 
     # -------- User 프롬프트(입력/스키마) --------
-    input_json = json.dumps({"text": text, "year": year, "preferred_genres": genres or []}, ensure_ascii=False)
+    input_json = json.dumps(
+        {
+            "text": text,
+            "year": year,
+            "preferred_genres": genres or [],
+            "detected_contexts": contexts,
+            "recommendation_profile": recommendation_profile,
+        },
+        ensure_ascii=False,
+    )
 
     _output_schema = {
         "emotion": {
@@ -547,7 +636,7 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
         resp = client.chat.completions.create(
             model=OPENAI_ANALYSIS_MODEL,
             response_format={"type": "json_object"},
-            temperature=0.45,
+            temperature=0.75,
             max_completion_tokens=MAX_ANALYSIS_OUTPUT_TOKENS,
             messages=messages,
         )
