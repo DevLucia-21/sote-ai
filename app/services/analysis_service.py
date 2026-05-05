@@ -342,6 +342,28 @@ def _sanitize_emotion_reason(reason: Optional[str], label: str = "") -> str:
 
     text = re.sub(r"\s+", " ", text).strip()
 
+    too_many_quotes = text.count("“") >= 2 or text.count('"') >= 2
+    too_long = len(text) > 120
+    too_many_commas = text.count(",") >= 3
+    too_much_analysis = (
+        text.count("를 보니") >= 2
+        or text.count("라고") >= 2
+        or text.count("문장") >= 2
+        or text.count("표현에서") >= 2
+    )
+
+    if too_many_quotes or too_long or too_many_commas or too_much_analysis:
+        if label == "기쁨":
+            return "오늘은 마음이 가볍게 올라왔구나. 작은 성취감과 밝은 기대가 함께 느껴진 것 같아."
+        if label == "무기력":
+            return "오늘은 기운이 조금 빠졌구나. 마음이 멈춰 선 듯해서 쉽게 움직이기 어려웠던 것 같아."
+        if label == "예민":
+            return "오늘은 생각이 많았구나. 작은 일에도 마음이 쉽게 흔들릴 수 있었던 것 같아."
+        if label == "슬픔":
+            return "오늘은 마음이 조금 가라앉았구나. 쉽게 털어내기 어려운 감정이 남아 있었던 것 같아."
+        if label == "화남":
+            return "오늘은 마음에 불편함이 쌓였구나. 그냥 넘기기 어려운 감정이 올라왔던 것 같아."
+
     if not text or len(text) < 15:
         if label == "기쁨":
             return "오늘은 마음이 꽤 밝았구나. 가볍게 들뜬 표현에서 기분 좋은 에너지가 느껴지는 상태인 것 같아."
@@ -405,6 +427,12 @@ def _choose_eul_reul(s: str) -> str:
         return "을" if (code - 0xAC00) % 28 else "를"
     return "를"
 
+def _shorten_clue(clue: str, max_len: int = 12) -> str:
+    clue = re.sub(r"[.!?…]+$", "", str(clue).strip())
+    if len(clue) > max_len:
+        return clue[:max_len].rstrip() + "…"
+    return clue
+
 def _format_korean_reason_sentence(reason_parts: dict) -> str:
     """
     reason_parts = {
@@ -419,19 +447,17 @@ def _format_korean_reason_sentence(reason_parts: dict) -> str:
 
     summary = re.sub(r"[.!?…]+\s*$", "", (reason_parts.get("summary") or "").strip())
     interp  = re.sub(r"[.!?…]+\s*$", "", (reason_parts.get("interpretation") or "").strip())
-    clues   = [
-        re.sub(r'[\"\'\s]+$', "", str(c).strip())
+    clues = [
+        str(c).strip()
         for c in (reason_parts.get("clues") or [])
         if str(c).strip()
     ]
 
     if clues:
-        # 유니코드 큰따옴표로 감싸기
-        clues_text = ", ".join([f'“{c}”' for c in clues])
-        particle = _choose_eul_reul(clues[-1])
-        return f'{summary}. {clues_text}{particle} 보니 {interp}.'
-    else:
-        return f'{summary}. 그래서 {interp}.'
+        clue = _shorten_clue(clues[0])
+        return f'{summary}. “{clue}”라는 표현에서 {interp}.'
+
+    return f'{summary}. {interp}.'
 
 def _diversify_music_candidates(candidates: List[dict]) -> List[dict]:
     """
@@ -624,6 +650,13 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
     - 사용자의 문장을 평가하지 말고, 사용자의 하루와 감정을 부드럽게 읽어주는 말투로 쓴다.
     - reason_parts.summary는 자연스러운 1문장으로 쓰고 반드시 "~했구나"로 끝낸다.
     - reason_parts.clues는 일기 속 표현을 짧게 옮기되, "라고 직접 표현함" 같은 분석 말투를 붙이지 않는다.
+    - emotion.reason은 일기 내용을 길게 요약하지 않는다.
+    - 사용자가 쓴 문장을 그대로 이어 붙이지 않는다.
+    - 일기 원문 인용은 최대 1개만 사용하고, 12자 이내의 짧은 표현만 사용한다.
+    - reason_parts.clues는 최대 1개만 작성한다.
+    - reason_parts.clues에 긴 문장, 쉼표가 많은 문장, 여러 사건을 나열한 문장을 넣지 않는다.
+    - "무엇을 했다"보다 "그래서 어떤 감정이 느껴졌는지"를 중심으로 쓴다.
+    - reason은 사용자의 하루를 요약하는 문장이 아니라, 감정의 결을 읽어주는 문장이어야 한다.
     - reason_parts.interpretation은 자연스러운 1문장으로 쓰고 반드시 "~인 것 같아"로 끝낸다.
     - 과장된 위로, 상담사 말투, 진단성 표현은 피한다.
     - 긍정/부정이 섞이면 가장 강한 정서를 고르되, reason에는 섞인 감정을 자연스럽게 반영한다.
@@ -632,6 +665,8 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
     - "오늘은 마음이 꽤 밝았구나. “기뻐”라는 말에서 가볍게 들뜬 기분이 느껴져서, 작은 순간도 즐겁게 받아들이는 상태인 것 같아."
     - "오늘은 조금 지친 하루를 보냈구나. 계속 버티고 있다는 표현을 보니 몸도 마음도 쉬고 싶었던 상태인 것 같아."
     - "오늘은 생각이 많았구나. 사소한 일에도 마음이 예민하게 반응해서 쉽게 가라앉지 않았던 것 같아."
+    - "오늘은 마음이 가볍게 올라왔구나. 마무리가 가까워졌다는 느낌에서 뿌듯함과 해방감이 함께 느껴진 것 같아."
+    - "오늘은 기운이 조금 빠졌구나. 뭘 해야 할지 막막한 마음 때문에 쉽게 움직이기 어려웠던 것 같아."
 
     나쁜 emotion.reason 예:
     - "음악 추천이 잘 되는지 확인하면서 기쁘다고 했구나."
@@ -639,10 +674,22 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
     - "기쁨을 직접 표현함."
     - "사용자의 문장에서 긍정 정서가 확인됨."
     - "추천 결과를 기대하면서 기분이 밝아진 상태..."
+    - "오늘은 마무리가 가까워진 일을 정하면서 뿌듯한 마음이 커졌구나."
+    - "개발은 거의 끝나서 정리를 하고 있다를 보니 오랜 시간 붙잡고 있던 일을 잘 마무리해 가는 해방감과 성취감이 함께 느껴지는 하루인 것 같아."
 
     음악 추천 다양성 규칙:
     - 추천되는 3곡 자체가 서로 다른 artist, album, genre의 sub 값을 갖도록 고른다.
     - 3곡은 서로 다른 분위기 또는 다른 에너지 흐름을 가져야 한다.
+    - 음악 추천은 emotion.label만 보지 말고 emotion.score와 감정 에너지 상태를 함께 고려한다.
+    - 기쁨이라도 무조건 벅차고 큰 곡을 추천하지 않는다.
+      - 성취감/마무리/해방감이면 밝지만 과하지 않은 곡을 우선한다.
+      - 들뜸/축하/활동성이 강하면 리듬감 있는 곡을 허용한다.
+    - 무기력이라도 갑자기 너무 밝은 곡으로 끌어올리지 않는다.
+      - 낮은 에너지에서 천천히 움직일 수 있는 곡을 우선한다.
+      - 너무 활기찬 곡보다 담담하고 가볍게 회복되는 곡을 고른다.
+    - 예민은 자극적인 고음/강한 비트를 피하고, 긴장을 낮추는 곡을 고른다.
+    - 슬픔은 너무 깊게 가라앉히는 곡만 고르지 말고, 감정을 받아주되 정리할 수 있는 곡을 고른다.
+    - 화남은 폭발적인 곡보다 감정을 풀어낼 수 있는 리듬이나 드라이브감을 우선한다.
     - 같은 감정이어도 매번 비슷한 발라드/잔잔한 곡만 추천하지 않는다.
     - 너무 유명한 기본 추천곡만 반복하지 말고, 대중적으로 확인 가능한 곡 안에서 다양하게 고른다.
     - "힐링", "위로", "슬픔" 같은 넓은 감정 키워드에 매번 떠오르는 고정 추천곡은 피한다.
@@ -685,6 +732,9 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
     - 사용자의 일기 감정과 곡의 분위기가 어떻게 이어지는지 자연스럽게 설명한다.
     - "~다"로 끝나는 딱딱한 설명문만 반복하지 않는다.
     - 가능하면 "~해줘", "~어울려", "~좋을 것 같아", "~이어갈 수 있어"처럼 부드러운 문장으로 쓴다.
+    - music.reason은 곡 제목이나 추천 전략을 설명하지 말고, 사용자의 감정 에너지와 곡의 흐름이 어떻게 맞는지 설명한다.
+    - "마무리의 성취감", "멈춰 선 마음", "가볍게 움직일 힘"처럼 감정의 움직임을 중심으로 설명한다.
+    - 너무 일반적인 "잘 어울린다", "듣기 좋다"만 반복하지 않는다.
     - 추천 프로필, 큐레이션 전략, 장르 배치 전략을 reason에 직접 언급하지 않는다.
     - "한국 곡 두 곡 뒤에", "해외 곡으로", "3곡 구성", "단조롭지 않게", "선호 장르인", "다른 분위기를 더해", "전략", "프로필", "구성" 같은 내부 큐레이션 표현은 절대 쓰지 않는다.
     - 사용자가 볼 문장이므로 자연스러운 감상 문장으로 쓴다.
