@@ -320,6 +320,36 @@ def _clean_reason_text(s: Optional[str]) -> str:
         return ""
     return _REASON_PREFIX_RE.sub("", s).strip()
 
+_INTERNAL_REASON_PATTERNS = [
+    r"한국 곡.*?해외 곡.*?[.!?。]?",
+    r"해외 곡.*?포함.*?[.!?。]?",
+    r"선호 장르인\s*\w+.*?[.!?。]?",
+    r"3곡 구성.*?[.!?。]?",
+    r"구성이 단조롭지 않게.*?[.!?。]?",
+    r"다른 분위기를 더해.*?[.!?。]?",
+    r"추천 프로필.*?[.!?。]?",
+    r"큐레이션 전략.*?[.!?。]?",
+    r"장르 전략.*?[.!?。]?",
+    r"시대 구성.*?[.!?。]?",
+    r"인지도 구성.*?[.!?。]?",
+    r"언어/지역 구성.*?[.!?。]?",
+]
+
+def _sanitize_music_reason(reason: Optional[str], mood: str = "", track_summary: str = "") -> str:
+    text = _clean_reason_text(reason)
+
+    for pattern in _INTERNAL_REASON_PATTERNS:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
+
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if not text or len(text) < 12:
+        mood_text = (mood or "차분한 분위기").strip()
+        summary_text = (track_summary or "일기의 감정과 어울리는 곡").strip()
+        text = f"{mood_text} 분위기가 오늘의 감정과 자연스럽게 이어지고, {summary_text}."
+
+    return text
+
 def _choose_eul_reul(s: str) -> str:
     """끝 글자 받침에 따라 '을/를' 선택"""
     if not s:
@@ -587,6 +617,19 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
     music.reason 규칙:
     - "추천 이유:", "일기와의 연결 이유:" 같은 접두사는 쓰지 않는다.
     - 한두 문장으로 작성한다.
+    - reason은 사용자의 일기 내용, 감정, 상황과 해당 곡의 분위기가 어떻게 연결되는지만 설명한다.
+    - 추천 프로필, 큐레이션 전략, 장르 배치 전략을 reason에 직접 언급하지 않는다.
+    - "한국 곡 두 곡 뒤에", "해외 곡으로", "3곡 구성", "단조롭지 않게", "선호 장르인", "다른 분위기를 더해", "전략", "프로필", "구성" 같은 내부 큐레이션 표현은 절대 쓰지 않는다.
+    - 사용자가 볼 문장이므로 자연스러운 감상 문장으로 쓴다.
+
+    좋은 예:
+    "복잡했던 마음을 너무 무겁게 끌고 가지 않으면서, 리듬감 있게 기분을 조금 환기해주는 곡이다."
+    "조용히 가라앉은 하루의 분위기와 잘 맞고, 생각을 정리할 때 부담 없이 들을 수 있다."
+
+    나쁜 예:
+    "한국 곡 두 곡 뒤에 넣기 좋은 해외 곡이다."
+    "선호 장르인 pop과도 맞고, 3곡 구성이 단조롭지 않게 해준다."
+    "이번 추천 프로필의 장르 전략에 맞는 곡이다."
     """
 
     # -------- User 프롬프트(입력/스키마) --------
@@ -596,7 +639,6 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
             "year": year,
             "preferred_genres": genres or [],
             "detected_contexts": contexts,
-            "recommendation_profile": recommendation_profile,
         },
         ensure_ascii=False,
     )
@@ -707,9 +749,12 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
             main, sub, fused = _ensure_major_sub(g_raw, preferred_majors)
             c["genre"] = fused
 
-            # reason 접두사 클린업
-            if isinstance(c.get("reason"), str):
-                c["reason"] = _clean_reason_text(c["reason"])
+            # reason 접두사/내부 큐레이션 표현 클린업
+            c["reason"] = _sanitize_music_reason(
+                c.get("reason"),
+                c.get("mood", ""),
+                c.get("track_summary", ""),
+            )
 
             # genre_main/sub 출력 숨김
             c.pop("genre_main", None)
@@ -741,8 +786,11 @@ def analyze_text(text: str, year: int, genres: Optional[List[str]] = None) -> di
                 if isinstance(c, dict):
                     c.pop("genre_main", None)
                     c.pop("genre_sub", None)
-                    if isinstance(c.get("reason"), str):
-                        c["reason"] = _clean_reason_text(c["reason"])
+                    c["reason"] = _sanitize_music_reason(
+                        c.get("reason"),
+                        c.get("mood", ""),
+                        c.get("track_summary", ""),
+                    )
 
         # 선호 대분류 패널티 기준으로 정렬(선호 일치 우선)
         normalized.sort(key=lambda x: x.get("_prefer_penalty", 0))
