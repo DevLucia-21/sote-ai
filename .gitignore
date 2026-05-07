@@ -1,4 +1,4 @@
-# secrets
+# Secrets
 config/*.json
 *.pem
 *.key
@@ -12,7 +12,6 @@ __pycache__/
 .venv/
 venv/
 
-
 # Environment variables
 .env
 .env*
@@ -20,26 +19,19 @@ venv/
 # Editor settings
 .vscode/
 
-# MacOS
+# OS
 .DS_Store
 
-# 테스트/샘플 파일 무시
+# Test / sample files
 *.jpg
 *.png
 *.wav
 *.m4a
-uploads/
-
-# uploads
-uploads/images/*
-!uploads/images/.gitkeepsample*.jpg
-
-sttsample.m4a
-
-preprocessed.jpg
-
-preprocessed.jpg
-
 sample*.jpg
-
 sttsample.m4a
+preprocessed.jpg
+
+# Uploads
+uploads/
+uploads/images/*
+!uploads/images/.gitkeep

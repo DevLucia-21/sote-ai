@@ -32,11 +32,11 @@ Spring Boot 백엔드와 분리된 FastAPI 서버로 구성하여, AI 처리 로
 | Project                  | S:ote                                                                   |
 | Team                     | Fluxion                                                                 |
 | Period                   | 2025 Capstone Design                                                    |
-| Award                    | 2025 캡스톤 경진대회 아리상                                                       |
+| Award                    | 2025 캡스톤 경진대회 아리상                                               |
 | Repository Type          | Portfolio-maintained AI server repository                               |
 | Original Team Repository | [fluxion-capstone/sote-ai](https://github.com/fluxion-capstone/sote-ai) |
 | Personal Repository      | [DevLucia-21/sote-ai](https://github.com/DevLucia-21/sote-ai)           |
-| Main Role                | AI Server / Backend / Frontend                                          |
+| Main Role                | Emotion analysis, prompt engineering, STT flow, backend integration     |
 
 ---
 
@@ -66,6 +66,23 @@ OpenAI API 기반 감정 분석 및 음악 추천
         ↓
 Spring Boot 백엔드와 프론트엔드 흐름에서 활용
 ```
+
+---
+
+## Repository Role
+
+이 저장소는 S:ote 서비스의 FastAPI 기반 AI 서버를 담당합니다.
+
+사용자가 작성한 텍스트 일기를 기반으로 감정을 분석하고,     
+감정 라벨, 감정 점수, 감정 요약, 추천 음악 후보를 생성합니다.
+
+또한 음성 일기 입력을 위한 STT 흐름과, 손글씨·이미지 입력 결과가 일기 작성 및 감정 분석 흐름으로 이어지는     
+AI 서버 내 입력 처리 흐름을 함께 관리합니다.
+
+Spring Boot 백엔드와는 API 응답 스키마를 기준으로 연동되며,      
+백엔드가 사용자, 일기, 챌린지, LP 보상 상태를 관리할 수 있도록 분석 결과와 추천 정보를 전달합니다.
+
+프로젝트 종료 이후에는 공개 포트폴리오용으로 환경 변수, 배포 설정, README, 민감 정보 제외 구조를 정리했습니다.
 
 ---
 
@@ -131,8 +148,9 @@ app/schemas/analysis.py
 
 감정 분석 결과와 일기 문맥을 바탕으로 음악 후보를 추천합니다.
 
-단순히 감정 라벨만 기준으로 추천하지 않고,      
-일기 속 상황 맥락, 사용자 출생연도, 선호 장르를 함께 고려하여 사용자에게 더 자연스럽게 느껴지는 추천 결과를 생성하도록 설계했습니다.
+단순히 감정 라벨만 기준으로 추천하지 않고,       
+일기 속 상황 맥락, 사용자 출생연도, 선호 장르를 함께 고려하여       
+사용자에게 더 자연스럽게 느껴지는 추천 결과를 생성하도록 설계했습니다.
 
 추천 결과에는 다음 정보가 포함됩니다.
 
@@ -217,7 +235,8 @@ OpenAI API 응답은 그대로 사용하지 않고, 서비스에서 사용할 �
 후처리에서는 감정 라벨을 서비스 기준으로 정규화하고,     
 분석 사유와 음악 추천 사유가 지나치게 딱딱하거나 내부 규칙을 노출하지 않도록 보정했습니다.
 
-또한 추천 곡이 같은 아티스트, 같은 앨범, 같은 소분류 장르에 몰리지 않도록 후보 다양성을 보정하는 로직을 구성했습니다.
+또한 추천 곡이 같은 아티스트, 같은 앨범, 같은 소분류 장르에 몰리지 않도록       
+후보 다양성을 보정하는 로직을 구성했습니다.
 
 관련 파일:
 
@@ -252,8 +271,8 @@ app/schemas/stt.py
 
 손글씨 또는 이미지 기반 일기 입력을 지원하기 위해 OCR 기능이 AI 서버에 포함되어 있습니다.
 
-
-본 리포지토리에서는 OCR 결과가 일기 작성 및 감정 분석 흐름과 연결될 수 있도록 AI 서버 구조 안에서 함께 관리됩니다.
+본 리포지토리에서는 OCR 결과가 일기 작성 및 감정 분석 흐름과 연결될 수 있도록       
+AI 서버 구조 안에서 함께 관리됩니다.
 
 관련 파일:
 
@@ -293,6 +312,54 @@ app/services/ocr_service.py
 
 ---
 
+## My Contribution
+
+본 프로젝트에서는 AI 서버의 감정 분석과 STT 기능,        
+그리고 Spring Boot 백엔드와의 연동 흐름을 주로 담당했습니다.
+
+감정 분석에서는 OpenAI API 기반 분석 구조를 사용하되,     
+서비스에 맞는 감정 라벨과 추천 결과가 안정적으로 생성되도록     
+프롬프트 설계, 일기 컨텍스트 전처리, 응답 후처리 로직을 구현했습니다.
+
+STT 기능에서는 초기 로컬 음성 인식 모델 기반 구현을 진행하고,    
+배포 환경을 고려하여 API 기반 처리 구조로 전환하는 방향을 검토했습니다.
+
+프로젝트 종료 이후에는 포트폴리오 공개를 위해     
+민감 정보 제거, 환경변수 정리, 불필요한 코드 정리, README 작성까지 진행했습니다.
+
+| Area                 | Contribution                          |
+| -------------------- | ------------------------------------- |
+| AI Server            | FastAPI 기반 AI 서버 구조 설계 및 구현           |
+| Emotion Analysis     | 일기 텍스트 기반 감정 분석 API 구현                |
+| Prompt Engineering   | 감정 라벨, 감정 점수, 추천 결과 생성을 위한 프롬프트 설계    |
+| Preprocessing        | 사용자 정보, 선호 장르, 일기 컨텍스트 정리             |
+| Postprocessing       | 감정 라벨 정규화, 추천 사유 보정, 음악 후보 다양성 검증     |
+| Music Recommendation | 감정과 상황 맥락 기반 음악 후보 추천 로직 구성           |
+| STT                  | 음성 일기 입력을 위한 STT 처리 흐름 구현 및 API 전환 검토 |
+| Backend Integration  | Spring Boot 백엔드와 연동 가능한 API 응답 구조 설계  |
+| Portfolio Cleanup    | 공개 리포지토리 전환을 위한 민감 정보 제거 및 문서 정리      |
+
+---
+
+## Tech Stack
+
+| Category              | Stack                       |
+| --------------------- | --------------------------- |
+| Language              | Python                      |
+| Framework             | FastAPI                     |
+| ASGI Server           | Uvicorn                     |
+| AI API                | OpenAI API                  |
+| STT                   | faster-whisper, ctranslate2 |
+| OCR                   | Google Cloud Vision         |
+| Text Processing       | kss, pecab, mecab-python3   |
+| Data Validation       | Pydantic, pydantic-settings |
+| API Client            | requests, httpx             |
+| Storage               | Google Cloud Storage        |
+| Cache / Queue Support | Redis                       |
+| Audio Processing      | ffmpeg-python               |
+
+---
+
 ## Project Structure
 
 ```text
@@ -302,21 +369,42 @@ sote-ai/
 │   │   ├── analysis.py         # 감정 분석 API
 │   │   ├── ocr.py              # OCR API
 │   │   └── stt.py              # STT API
+│   │
 │   ├── core/
 │   │   └── config.py           # 환경변수 및 설정 관리
+│   │
 │   ├── schemas/
 │   │   ├── analysis.py         # 감정 분석 요청/응답 스키마
+│   │   ├── diary.py            # 일기 저장 연동 요청/응답 스키마
+│   │   ├── ocr_request.py      # OCR 요청 스키마
 │   │   └── stt.py              # STT 응답 스키마
+│   │
 │   ├── services/
 │   │   ├── analysis_service.py # 감정 분석 및 음악 추천 로직
+│   │   ├── diary_service.py    # 일기 저장 연동 로직
 │   │   ├── ocr_service.py      # OCR 처리 로직
 │   │   └── stt_service.py      # STT 변환 로직
+│   │
 │   └── main.py                 # FastAPI 애플리케이션 진입점
+│   
 ├── requirements.txt
 ├── render.yaml
 ├── runtime.txt
 └── README.md
 ```
+
+---
+
+## External Integration
+
+| Integration          | Description                                     |
+| -------------------- | ----------------------------------------------- |
+| Spring Boot Backend  | 감정 분석, STT, OCR 처리 결과를 백엔드 흐름과 연동 |
+| OpenAI API           | 일기 텍스트 기반 감정 분석 및 음악 추천 생성       |
+| Google Cloud Vision  | 손글씨·이미지 기반 OCR 처리                      |
+| Google Cloud Storage | OCR 이미지 및 외부 파일 처리 흐름에 활용          |
+| Redis                | 서비스 보조 데이터 및 캐시 흐름 지원              |
+| Render               | FastAPI 서버 배포 환경                          |
 
 ---
 
@@ -413,51 +501,6 @@ base64 형태로 인코딩한 값을 환경변수로 등록한 뒤
 
 ---
 
-## My Contribution
-
-본 프로젝트에서는 AI 서버의 감정 분석과 STT 기능, 그리고 Spring Boot 백엔드와의 연동 흐름을 주로 담당했습니다.
-
-감정 분석에서는 OpenAI API 기반 분석 구조를 사용하되,     
-서비스에 맞는 감정 라벨과 추천 결과가 안정적으로 생성되도록     
-프롬프트 설계, 일기 컨텍스트 전처리, 응답 후처리 로직을 구현했습니다.
-
-STT 기능에서는 초기 로컬 음성 인식 모델 기반 구현을 진행하고,    
-배포 환경을 고려하여 API 기반 처리 구조로 전환하는 방향을 검토했습니다.
-
-프로젝트 종료 이후에는 포트폴리오 공개를 위해     
-민감 정보 제거, 환경변수 정리, 불필요한 코드 정리, README 작성까지 진행했습니다.
-
-| Area                 | Contribution                          |
-| -------------------- | ------------------------------------- |
-| AI Server            | FastAPI 기반 AI 서버 구조 설계 및 구현           |
-| Emotion Analysis     | 일기 텍스트 기반 감정 분석 API 구현                |
-| Prompt Engineering   | 감정 라벨, 감정 점수, 추천 결과 생성을 위한 프롬프트 설계    |
-| Preprocessing        | 사용자 정보, 선호 장르, 일기 컨텍스트 정리             |
-| Postprocessing       | 감정 라벨 정규화, 추천 사유 보정, 음악 후보 다양성 검증     |
-| Music Recommendation | 감정과 상황 맥락 기반 음악 후보 추천 로직 구성           |
-| STT                  | 음성 일기 입력을 위한 STT 처리 흐름 구현 및 API 전환 검토 |
-| Backend Integration  | Spring Boot 백엔드와 연동 가능한 API 응답 구조 설계  |
-| Portfolio Cleanup    | 공개 리포지토리 전환을 위한 민감 정보 제거 및 문서 정리      |
-
----
-
-## Tech Stack
-
-| Category         | Stack                            |
-| ---------------- | -------------------------------- |
-| Language         | Python                           |
-| Framework        | FastAPI                          |
-| Server           | Uvicorn                          |
-| AI / LLM         | OpenAI API                       |
-| STT              | Whisper, faster-whisper          |
-| Audio Processing | FFmpeg, pydub                    |
-| OCR              | Google Cloud Vision              |
-| Cache / Limit    | Redis                            |
-| HTTP Client      | requests, httpx                  |
-| Config           | python-dotenv, pydantic-settings |
-
----
-
 ## Environment Variables
 
 프로젝트 실행을 위해 로컬 환경에서 `.env` 파일을 생성하고 필요한 값을 설정해야 합니다.
@@ -542,18 +585,8 @@ http://localhost:8000/health
 | [sote-fe](https://github.com/DevLucia-21/sote-fe)                       | S:ote 프론트엔드 리포지토리        |
 | [sote-be](https://github.com/DevLucia-21/sote-be)                       | Spring Boot 기반 백엔드 리포지토리 |
 | [sote-ai](https://github.com/DevLucia-21/sote-ai)                       | FastAPI 기반 AI 서버 리포지토리   |
-| [fluxion-capstone/sote-ai](https://github.com/fluxion-capstone/sote-ai) | S:ote 원본 팀 AI 서버 리포지토리   |
 
----
-
-## Note
-
-본 저장소는 Fluxion 팀 캡스톤 프로젝트의 AI 서버 코드를 개인 포트폴리오용으로 정리한 리포지토리입니다.
-
-실제 운영 환경에서 사용한 민감 설정값은 포함하지 않으며,     
-로컬 실행을 위해서는 별도의 환경 변수 및 외부 서비스 설정이 필요합니다.
-
-원본 팀 리포지토리는 팀 프로젝트 진행 당시 사용한 저장소이며, 현재 접근 권한 또는 공개 여부가 변경되었을 수 있습니다.
+본 저장소는 Fluxion 팀 프로젝트의 AI 서버 코드를 개인 포트폴리오용으로 정리한 리포지토리입니다.
 
 ---
 
