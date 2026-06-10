@@ -35,7 +35,7 @@ Spring Boot 백엔드와 분리된 FastAPI 서버로 구성하여, AI 처리 로
 | Award                    | 2025 캡스톤 경진대회 아리상                                               |
 | Repository Type          | Portfolio-maintained AI server repository                               |
 | Original Team Repository | [fluxion-capstone/sote-ai](https://github.com/fluxion-capstone/sote-ai) |
-| Personal Repository      | [DevLucia-21/sote-ai](https://github.com/DevLucia-21/sote-ai)           |
+| Personal Repository      | [dPdms21/sote-ai](https://github.com/dPdms21/sote-ai)           |
 | Main Role                | Emotion analysis, prompt engineering, STT flow, backend integration     |
 
 ---
@@ -90,8 +90,8 @@ Spring Boot 백엔드와는 API 응답 스키마를 기준으로 연동되며,
 
 | Branch                                                     | Description          |
 | ---------------------------------------------------------- | -------------------- |
-| [`main`](https://github.com/DevLucia-21/sote-ai/tree/main) | 포트폴리오용 최종 정리 브랜치     |
-| [`dev`](https://github.com/DevLucia-21/sote-ai/tree/dev)   | AI 서버 개발 및 기능 통합 브랜치 |
+| [`main`](https://github.com/dPdms21/sote-ai/tree/main) | 포트폴리오용 최종 정리 브랜치     |
+| [`dev`](https://github.com/dPdms21/sote-ai/tree/dev)   | AI 서버 개발 및 기능 통합 브랜치 |
 
 ---
 
@@ -536,7 +536,7 @@ SEND_OCR_TO_SPRING
 ## Running the Project
 
 ```bash
-git clone https://github.com/DevLucia-21/sote-ai.git
+git clone https://github.com/dPdms21/sote-ai.git
 cd sote-ai
 ```
 
@@ -582,9 +582,9 @@ http://localhost:8000/health
 
 | Repository                                                              | Description              |
 | ----------------------------------------------------------------------- | ------------------------ |
-| [sote-fe](https://github.com/DevLucia-21/sote-fe)                       | S:ote 프론트엔드 리포지토리        |
-| [sote-be](https://github.com/DevLucia-21/sote-be)                       | Spring Boot 기반 백엔드 리포지토리 |
-| [sote-ai](https://github.com/DevLucia-21/sote-ai)                       | FastAPI 기반 AI 서버 리포지토리   |
+| [sote-fe](https://github.com/dPdms21/sote-fe)                       | S:ote 프론트엔드 리포지토리        |
+| [sote-be](https://github.com/dPdms21/sote-be)                       | Spring Boot 기반 백엔드 리포지토리 |
+| [sote-ai](https://github.com/dPdms21/sote-ai)                       | FastAPI 기반 AI 서버 리포지토리   |
 
 본 저장소는 Fluxion 팀 프로젝트의 AI 서버 코드를 개인 포트폴리오용으로 정리한 리포지토리입니다.
 
@@ -594,4 +594,4 @@ http://localhost:8000/health
 
 **Yeeun Park**
 
-* GitHub: [DevLucia-21](https://github.com/DevLucia-21)
+* GitHub: [dPdms21](https://github.com/dPdms21)
